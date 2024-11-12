@@ -1458,6 +1458,10 @@ pub enum Message<T: 'static> {
     Box<dyn FnOnce() -> (String, TaoWindowBuilder) + Send>,
     Sender<Result<Weak<Window>>>,
   ),
+  #[cfg(feature = "push-notifications")]
+  PushRegistration(PushToken),
+  #[cfg(feature = "push-notifications")]
+  PushRegistrationFailed(String),
   UserEvent(T),
 }
 
@@ -3863,6 +3867,11 @@ fn handle_user_message<T: UserEvent>(
       }
     }
 
+    #[cfg(feature = "push-notifications")]
+    Message::PushRegistration(_) => (),
+    #[cfg(feature = "push-notifications")]
+    Message::PushRegistrationFailed(_) => (),
+
     Message::UserEvent(_) => (),
     Message::EventLoopWindowTarget(message) => match message {
       EventLoopWindowTargetMessage::CursorPosition(sender) => {
@@ -4120,6 +4129,11 @@ fn handle_event_loop<T: UserEvent>(
     } => callback(RunEvent::Reopen {
       has_visible_windows,
     }),
+    #[cfg(feature = "push-notifications")]
+    Event::PushRegistration(token) => callback(RunEvent::PushRegistration(token)),
+    #[cfg(feature = "push-notifications")]
+    Event::PushRegistrationError(token) => callback(RunEvent::PushRegistrationFailed(token)),
+
     _ => (),
   }
 }
