@@ -17,7 +17,6 @@ use http::Request;
 use raw_window_handle::{DisplayHandle, HasDisplayHandle, HasWindowHandle};
 
 use tauri_runtime::{
-  PushToken,
   dpi::{LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize, Position, Size},
   monitor::Monitor,
   webview::{DetachedWebview, DownloadEvent, PendingWebview, WebviewIpcHandler},
@@ -29,6 +28,9 @@ use tauri_runtime::{
   ProgressBarState, ProgressBarStatus, Result, RunEvent, Runtime, RuntimeHandle, RuntimeInitArgs,
   UserAttentionType, UserEvent, WebviewDispatch, WebviewEventId, WindowDispatch, WindowEventId,
 };
+
+#[cfg(feature = "push-notifications")]
+use tauri_runtime::PushToken;
 
 #[cfg(target_vendor = "apple")]
 use objc2::rc::Retained;
