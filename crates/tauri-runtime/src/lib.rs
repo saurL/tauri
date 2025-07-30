@@ -49,6 +49,24 @@ pub type WindowEventId = u32;
 pub type WebviewEventId = u32;
 pub type PushToken = Vec<u8>;
 
+/// A rectangular region.
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct Rect {
+  /// Rect position.
+  pub position: dpi::Position,
+  /// Rect size.
+  pub size: dpi::Size,
+}
+
+impl Default for Rect {
+  fn default() -> Self {
+    Self {
+      position: Position::Logical((0, 0).into()),
+      size: Size::Logical((0, 0).into()),
+    }
+  }
+}
+
 /// Progress bar status.
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "camelCase")]
