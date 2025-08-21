@@ -10,10 +10,10 @@ use crate::app::{GlobalMenuEventListener, GlobalTrayIconEventListener};
 use crate::menu::ContextMenu;
 use crate::menu::MenuEvent;
 use crate::resources::Resource;
-use crate::UnsafeSend;
 use crate::{
   image::Image, menu::run_item_main_thread, AppHandle, Manager, PhysicalPosition, Rect, Runtime,
 };
+use crate::{ResourceId, UnsafeSend};
 use serde::Serialize;
 use std::path::Path;
 pub use tray_icon::TrayIconId;
@@ -307,8 +307,26 @@ impl<R: Runtime> TrayIconBuilder<R> {
     self
   }
 
-  /// Whether to show the tray menu on left click or not, default is `true`. **macOS only**.
+  /// Whether to show the tray menu on left click or not, default is `true`.
+  ///
+  /// ## Platform-specific:
+  ///
+  /// - **Linux:** Unsupported.
+  #[deprecated(
+    since = "2.2.0",
+    note = "Use `TrayIconBuiler::show_menu_on_left_click` instead."
+  )]
   pub fn menu_on_left_click(mut self, enable: bool) -> Self {
+    self.inner = self.inner.with_menu_on_left_click(enable);
+    self
+  }
+
+  /// Whether to show the tray menu on left click or not, default is `true`.
+  ///
+  /// ## Platform-specific:
+  ///
+  /// - **Linux:** Unsupported.
+  pub fn show_menu_on_left_click(mut self, enable: bool) -> Self {
     self.inner = self.inner.with_menu_on_left_click(enable);
     self
   }
@@ -340,8 +358,10 @@ impl<R: Runtime> TrayIconBuilder<R> {
     self.inner.id()
   }
 
-  /// Builds and adds a new [`TrayIcon`] to the system tray.
-  pub fn build<M: Manager<R>>(self, manager: &M) -> crate::Result<TrayIcon<R>> {
+  pub(crate) fn build_inner(
+    self,
+    app_handle: &AppHandle<R>,
+  ) -> crate::Result<(TrayIcon<R>, ResourceId)> {
     let id = self.id().clone();
 
     // SAFETY:
@@ -350,8 +370,7 @@ impl<R: Runtime> TrayIconBuilder<R> {
     let unsafe_builder = UnsafeSend(self.inner);
 
     let (tx, rx) = std::sync::mpsc::channel();
-    let unsafe_tray = manager
-      .app_handle()
+    let unsafe_tray = app_handle
       .run_on_main_thread(move || {
         // SAFETY: will only be accessed on main thread
         let _ = tx.send(unsafe_builder.take().build().map(UnsafeSend));
@@ -361,15 +380,21 @@ impl<R: Runtime> TrayIconBuilder<R> {
     let icon = TrayIcon {
       id,
       inner: unsafe_tray.take(),
-      app_handle: manager.app_handle().clone(),
+      app_handle: app_handle.clone(),
     };
 
-    icon.register(
+    let rid = icon.register(
       &icon.app_handle,
       self.on_menu_event,
       self.on_tray_icon_event,
     );
 
+    Ok((icon, rid))
+  }
+
+  /// Builds and adds a new [`TrayIcon`] to the system tray.
+  pub fn build<M: Manager<R>>(self, manager: &M) -> crate::Result<TrayIcon<R>> {
+    let (icon, _rid) = self.build_inner(manager.app_handle())?;
     Ok(icon)
   }
 }
@@ -408,7 +433,7 @@ impl<R: Runtime> TrayIcon<R> {
     app_handle: &AppHandle<R>,
     on_menu_event: Option<GlobalMenuEventListener<AppHandle<R>>>,
     on_tray_icon_event: Option<GlobalTrayIconEventListener<TrayIcon<R>>>,
-  ) {
+  ) -> ResourceId {
     if let Some(handler) = on_menu_event {
       app_handle
         .manager
@@ -429,13 +454,15 @@ impl<R: Runtime> TrayIcon<R> {
         .insert(self.id.clone(), handler);
     }
 
+    let rid = app_handle.resources_table().add(self.clone());
     app_handle
       .manager
       .tray
       .icons
       .lock()
       .unwrap()
-      .push(self.clone());
+      .push((self.id().clone(), rid));
+    rid
   }
 
   /// The application handle associated with this type.
@@ -493,9 +520,9 @@ impl<R: Runtime> TrayIcon<R> {
   ///
   /// - **Linux**: once a menu is set it cannot be removed so `None` has no effect
   pub fn set_menu<M: ContextMenu + 'static>(&self, menu: Option<M>) -> crate::Result<()> {
-    run_item_main_thread!(self, |self_: Self| self_
-      .inner
-      .set_menu(menu.map(|m| m.inner_context_owned())))
+    run_item_main_thread!(self, |self_: Self| {
+      self_.inner.set_menu(menu.map(|m| m.inner_context_owned()))
+    })
   }
 
   /// Sets the tooltip for this tray icon.
@@ -543,18 +570,23 @@ impl<R: Runtime> TrayIcon<R> {
   /// Sets the current icon as a [template](https://developer.apple.com/documentation/appkit/nsimage/1520017-template?language=objc). **macOS only**.
   pub fn set_icon_as_template(&self, #[allow(unused)] is_template: bool) -> crate::Result<()> {
     #[cfg(target_os = "macos")]
-    run_item_main_thread!(self, |self_: Self| self_
-      .inner
-      .set_icon_as_template(is_template))?;
+    run_item_main_thread!(self, |self_: Self| {
+      self_.inner.set_icon_as_template(is_template)
+    })?;
     Ok(())
   }
 
-  /// Disable or enable showing the tray menu on left click. **macOS only**.
+  /// Disable or enable showing the tray menu on left click.
+  ///
+  ///
+  /// ## Platform-specific:
+  ///
+  /// - **Linux**: Unsupported.
   pub fn set_show_menu_on_left_click(&self, #[allow(unused)] enable: bool) -> crate::Result<()> {
-    #[cfg(target_os = "macos")]
-    run_item_main_thread!(self, |self_: Self| self_
-      .inner
-      .set_show_menu_on_left_click(enable))?;
+    #[cfg(any(target_os = "macos", windows))]
+    run_item_main_thread!(self, |self_: Self| {
+      self_.inner.set_show_menu_on_left_click(enable)
+    })?;
     Ok(())
   }
 
@@ -564,18 +596,36 @@ impl<R: Runtime> TrayIcon<R> {
   ///
   /// - **Linux**: Unsupported, always returns `None`.
   pub fn rect(&self) -> crate::Result<Option<crate::Rect>> {
-    run_item_main_thread!(self, |self_: Self| self_.inner.rect().map(|rect| {
-      Rect {
+    run_item_main_thread!(self, |self_: Self| {
+      self_.inner.rect().map(|rect| Rect {
         position: rect.position.into(),
         size: rect.size.into(),
-      }
-    }))
+      })
+    })
+  }
+
+  /// Do something with the inner [`tray_icon::TrayIcon`] on main thread
+  ///
+  /// Note that `tray-icon` crate may be updated in minor releases of Tauri.
+  /// Therefore, it’s recommended to pin Tauri to at least a minor version when you’re using `with_inner_tray_icon`.
+  pub fn with_inner_tray_icon<F, T>(&self, f: F) -> crate::Result<T>
+  where
+    F: FnOnce(&tray_icon::TrayIcon) -> T + Send + 'static,
+    T: Send + 'static,
+  {
+    run_item_main_thread!(self, |self_: Self| { f(&self_.inner) })
   }
 }
 
 impl<R: Runtime> Resource for TrayIcon<R> {
   fn close(self: std::sync::Arc<Self>) {
-    self.app_handle.remove_tray_by_id(&self.id);
+    let mut icons = self.app_handle.manager.tray.icons.lock().unwrap();
+    for (i, (tray_icon_id, _rid)) in icons.iter_mut().enumerate() {
+      if tray_icon_id == &self.id {
+        icons.swap_remove(i);
+        return;
+      }
+    }
   }
 }
 

@@ -25,13 +25,14 @@ use anyhow::Context;
 use cargo_mobile2::{
   apple::{
     config::Config as AppleConfig,
-    device::{Device, DeviceKind},
+    device::{Device, DeviceKind, RunError},
+    target::BuildError,
   },
   env::Env,
   opts::{NoiseLevel, Profile},
 };
 
-use std::env::set_current_dir;
+use std::{env::set_current_dir, path::PathBuf};
 
 const PHYSICAL_IPHONE_DEV_WARNING: &str = "To develop on physical phones you need the `--host` option (not required for Simulators). See the documentation for more information: https://v2.tauri.app/develop/#development-server";
 
@@ -54,9 +55,15 @@ pub struct Options {
   /// Exit on panic
   #[clap(short, long)]
   exit_on_panic: bool,
-  /// JSON string or path to JSON file to merge with tauri.conf.json
+  /// JSON strings or paths to JSON, JSON5 or TOML files to merge with the default configuration file
+  ///
+  /// Configurations are merged in the order they are provided, which means a particular value overwrites previous values when a config key-value pair conflicts.
+  ///
+  /// Note that a platform-specific file is looked up and merged with the default file by default
+  /// (tauri.macos.conf.json, tauri.linux.conf.json, tauri.windows.conf.json, tauri.android.conf.json and tauri.ios.conf.json)
+  /// but you can use this for more specific use cases such as different build flavors.
   #[clap(short, long)]
-  pub config: Option<ConfigValue>,
+  pub config: Vec<ConfigValue>,
   /// Run the code in release mode
   #[clap(long = "release")]
   pub release_mode: bool,
@@ -66,6 +73,9 @@ pub struct Options {
   /// Disable the file watcher
   #[clap(long)]
   pub no_watch: bool,
+  /// Additional paths to watch for changes.
+  #[clap(long)]
+  pub additional_watch_folders: Vec<PathBuf>,
   /// Open Xcode instead of trying to run on a connected device
   #[clap(short, long)]
   pub open: bool,
@@ -94,6 +104,14 @@ pub struct Options {
   /// Specify port for the built-in dev server for static files. Defaults to 1430.
   #[clap(long, env = "TAURI_CLI_PORT")]
   pub port: Option<u16>,
+  /// Command line arguments passed to the runner.
+  /// Use `--` to explicitly mark the start of the arguments.
+  /// e.g. `tauri ios dev -- [runnerArgs]`.
+  #[clap(last(true))]
+  pub args: Vec<String>,
+  /// Path to the certificate file used by your dev server. Required for mobile dev when using HTTPS.
+  #[clap(long, env = "TAURI_DEV_ROOT_CERTIFICATE_PATH")]
+  pub root_certificate_path: Option<PathBuf>,
 }
 
 impl From<Options> for DevOptions {
@@ -105,8 +123,9 @@ impl From<Options> for DevOptions {
       exit_on_panic: options.exit_on_panic,
       config: options.config,
       release_mode: options.release_mode,
-      args: Vec::new(),
+      args: options.args,
       no_watch: options.no_watch,
+      additional_watch_folders: options.additional_watch_folders,
       no_dev_server: options.no_dev_server,
       no_dev_server_wait: options.no_dev_server_wait,
       port: options.port,
@@ -126,6 +145,14 @@ pub fn command(options: Options, noise_level: NoiseLevel) -> Result<()> {
 }
 
 fn run_command(options: Options, noise_level: NoiseLevel) -> Result<()> {
+  // setup env additions before calling env()
+  if let Some(root_certificate_path) = &options.root_certificate_path {
+    std::env::set_var(
+      "TAURI_DEV_ROOT_CERTIFICATE",
+      std::fs::read_to_string(root_certificate_path).context("failed to read certificate file")?,
+    );
+  }
+
   let env = env()?;
   let device = if options.open {
     None
@@ -148,7 +175,7 @@ fn run_command(options: Options, noise_level: NoiseLevel) -> Result<()> {
 
   let tauri_config = get_tauri_config(
     tauri_utils::platform::Target::Ios,
-    options.config.as_ref().map(|c| &c.0),
+    &options.config.iter().map(|c| &c.0).collect::<Vec<_>>(),
   )?;
   let (interface, config) = {
     let tauri_config_guard = tauri_config.lock().unwrap();
@@ -162,7 +189,7 @@ fn run_command(options: Options, noise_level: NoiseLevel) -> Result<()> {
       tauri_config_,
       dev_options.features.as_ref(),
       &Default::default(),
-    );
+    )?;
 
     (interface, config)
   };
@@ -258,9 +285,10 @@ fn run_dev(
     MobileOptions {
       debug: true,
       features: options.features,
-      args: Vec::new(),
+      args: options.args,
       config: dev_options.config.clone(),
       no_watch: options.no_watch,
+      additional_watch_folders: options.additional_watch_folders,
     },
     |options| {
       let cli_options = CliOptions {
@@ -272,29 +300,31 @@ fn run_dev(
         config: dev_options.config.clone(),
         target_device: None,
       };
-      let _handle = write_options(
-        &tauri_config.lock().unwrap().as_ref().unwrap().identifier,
-        cli_options,
-      )?;
+      let _handle = write_options(tauri_config.lock().unwrap().as_ref().unwrap(), cli_options)?;
 
-      if open {
+      let open_xcode = || {
         if !set_host {
           log::warn!("{PHYSICAL_IPHONE_DEV_WARNING}");
         }
         open_and_wait(config, &env)
+      };
+
+      if open {
+        open_xcode()
       } else if let Some(device) = &device {
         match run(device, options, config, noise_level, &env) {
           Ok(c) => Ok(Box::new(c) as Box<dyn DevProcess + Send>),
+          Err(RunError::BuildFailed(BuildError::Sdk(sdk_err))) => {
+            log::warn!("{sdk_err}");
+            open_xcode()
+          }
           Err(e) => {
             crate::dev::kill_before_dev_process();
-            Err(e)
+            Err(e.into())
           }
         }
       } else {
-        if !set_host {
-          log::warn!("{PHYSICAL_IPHONE_DEV_WARNING}");
-        }
-        open_and_wait(config, &env)
+        open_xcode()
       }
     },
   )
@@ -306,7 +336,7 @@ fn run(
   config: &AppleConfig,
   noise_level: NoiseLevel,
   env: &Env,
-) -> crate::Result<DevChild> {
+) -> std::result::Result<DevChild, RunError> {
   let profile = if options.debug {
     Profile::Debug
   } else {
@@ -322,5 +352,4 @@ fn run(
       profile,
     )
     .map(DevChild::new)
-    .map_err(Into::into)
 }

@@ -1,5 +1,106 @@
 # Changelog
 
+## \[2.7.0]
+
+### New Features
+
+- [`91508c0b8`](https://www.github.com/tauri-apps/tauri/commit/91508c0b8d16ec61c7706e93b711c5a85aaffb4a) ([#13881](https://www.github.com/tauri-apps/tauri/pull/13881) by [@pepperoni505](https://www.github.com/tauri-apps/tauri/../../pepperoni505)) Introduces a new configuration option that allows you to specify custom folders to watch for changes when running `tauri dev`.
+- [`0c402bfb6`](https://www.github.com/tauri-apps/tauri/commit/0c402bfb6bd0bec24d928fcabe2ffef1f5cff19a) ([#13997](https://www.github.com/tauri-apps/tauri/pull/13997) by [@lucasfernog](https://www.github.com/tauri-apps/tauri/../../lucasfernog)) Increase default iOS deployment target iOS to 14.0.
+
+### Enhancements
+
+- [`9300b59f6`](https://www.github.com/tauri-apps/tauri/commit/9300b59f65156a37f7bf9a629b69da6761ae734a) ([#13787](https://www.github.com/tauri-apps/tauri/pull/13787) by [@JakenHerman](https://www.github.com/tauri-apps/tauri/../../JakenHerman)) Added `fips_compliant` field to `WixConfig` so that it can be configured via `tauri.conf.json` as well.
+- [`72b4226ee`](https://www.github.com/tauri-apps/tauri/commit/72b4226ee9932b4dafa4837a49420b2c02d14bb7) ([#13809](https://www.github.com/tauri-apps/tauri/pull/13809) by [@Beanow](https://www.github.com/tauri-apps/tauri/../../Beanow)) Reduced `Debug` format size for binary buffers.
+
+### Bug Fixes
+
+- [`1a3d1a024`](https://www.github.com/tauri-apps/tauri/commit/1a3d1a024ebb2a3dd5d15849523a55246d78fda6) ([#13995](https://www.github.com/tauri-apps/tauri/pull/13995) by [@will3942](https://www.github.com/tauri-apps/tauri/../../will3942)) Fix Tauri iOS build with binary XCFramework dependencies, allows extracting binaryTargets that are zipped and also not including XCFrameworks when linking.
+
+## \[2.6.0]
+
+### New Features
+
+- [`232265c70`](https://www.github.com/tauri-apps/tauri/commit/232265c70e1c213bbb3f84b5541ddc07d330fce1) ([#13209](https://www.github.com/tauri-apps/tauri/pull/13209) by [@kandrelczyk](https://www.github.com/tauri-apps/tauri/../../kandrelczyk)) Added `platform::bundle_type`.
+- [`33d079392`](https://www.github.com/tauri-apps/tauri/commit/33d079392ac4a5a153b7d8a6d82fefd6f54a2bdf) ([#13811](https://www.github.com/tauri-apps/tauri/pull/13811) by [@mhbagheri-99](https://www.github.com/tauri-apps/tauri/../../mhbagheri-99)) Allow runner configuration to be an object with cmd, cwd, and args properties. The runner can now be configured as `{ "cmd": "my_runner", "cwd": "/path", "args": ["--quiet"] }` while maintaining backwards compatibility with the existing string format.
+
+## \[2.5.0]
+
+### New Features
+
+- [`414619c36`](https://www.github.com/tauri-apps/tauri/commit/414619c36e94e21939534dd72c0438b93da75546) ([#13536](https://www.github.com/tauri-apps/tauri/pull/13536) by [@Tunglies](https://www.github.com/tauri-apps/tauri/../../Tunglies)) Added support for the `bundleName` property in the macOS bundler configuration. This allows specifying the `CFBundleName` value for generated macOS bundles.
+- [`09c19932d`](https://www.github.com/tauri-apps/tauri/commit/09c19932d2ddf05f28bcdc73796a966532e7ca1c) ([#13304](https://www.github.com/tauri-apps/tauri/pull/13304) by [@39zde](https://www.github.com/tauri-apps/tauri/../../39zde)) Adds the option to configure the HTTP `Service-Worker-Allowed` response header in `app > security > headers`
+
+### Bug Fixes
+
+- [`eb3f0248c`](https://www.github.com/tauri-apps/tauri/commit/eb3f0248c25f1d259cf0fa9448b3c7c2b75b24a7) ([#13646](https://www.github.com/tauri-apps/tauri/pull/13646) by [@Legend-Master](https://www.github.com/tauri-apps/tauri/../../Legend-Master)) Only write `This default permission set includes the following` to the reference if the default permission set is not empty
+- [`c8a30a61d`](https://www.github.com/tauri-apps/tauri/commit/c8a30a61d20552b43afd6f21cb66d18185314148) ([#13476](https://www.github.com/tauri-apps/tauri/pull/13476) by [@lucasfernog](https://www.github.com/tauri-apps/tauri/../../lucasfernog)) Fix capability filtering via `tauri.conf.json > app > security > capabilities` not working when generating allowed commands.
+- [`b52da29d5`](https://www.github.com/tauri-apps/tauri/commit/b52da29d5dbdb675ddba438a335e6a59f620e536) ([#13429](https://www.github.com/tauri-apps/tauri/pull/13429) by [@Legend-Master](https://www.github.com/tauri-apps/tauri/../../Legend-Master)) Fix `mainBinaryName` doesn't work when there's `.` in it
+
+### What's Changed
+
+- [`168629646`](https://www.github.com/tauri-apps/tauri/commit/168629646335f24cc7f1c4a61df22688b2198f98) ([#13418](https://www.github.com/tauri-apps/tauri/pull/13418) by [@Legend-Master](https://www.github.com/tauri-apps/tauri/../../Legend-Master)) Put dynamic ACL into a feature `dynamic-acl`, this is currently enabled by default to align with the previous behaviors, you can disable it through `default-features = false` to reduce the final binary size by not including the ACL references
+
+### Dependencies
+
+- [`9c16eefa3`](https://www.github.com/tauri-apps/tauri/commit/9c16eefa319b4697bac1d1019bbb5f93eca63173) ([#13629](https://www.github.com/tauri-apps/tauri/pull/13629) by [@sftse](https://www.github.com/tauri-apps/tauri/../../sftse)) Update html5ever to 0.29 and kuchikiki to version 0.8.8-speedreader.
+
+### Breaking Changes
+
+- [`b7cdb3b39`](https://www.github.com/tauri-apps/tauri/commit/b7cdb3b39ef7e84773ce9312535825801350fa20) ([#13410](https://www.github.com/tauri-apps/tauri/pull/13410) by [@Legend-Master](https://www.github.com/tauri-apps/tauri/../../Legend-Master)) Feature gated the HTML manipulation code in `tauri-utils` behined a flag to reduce compile time
+
+## \[2.4.0]
+
+### New Features
+
+- [`ea36294cb`](https://www.github.com/tauri-apps/tauri/commit/ea36294cbca98f7725c91d1464fd92e77c89698a) ([#13208](https://www.github.com/tauri-apps/tauri/pull/13208)) Added `disableInputAccessoryView: bool` config for iOS.
+- [`0aa48fb9e`](https://www.github.com/tauri-apps/tauri/commit/0aa48fb9e4b9d7b5bf3522000a76ebc1836394ed) ([#13030](https://www.github.com/tauri-apps/tauri/pull/13030)) Added `bundleVersion` to iOS and macOS configuration to support specifying a `CFBundleVersion`.
+- [`b072e2b29`](https://www.github.com/tauri-apps/tauri/commit/b072e2b2967640ae4fa1af466ae878c156551edd) ([#9687](https://www.github.com/tauri-apps/tauri/pull/9687)) Add `preventOverflow` config option to prevent the window from overflowing the monitor size on creation
+
+### Bug Fixes
+
+- [`2dccfab53`](https://www.github.com/tauri-apps/tauri/commit/2dccfab5321fef55d45f3a4c674b6151b1c4424a) ([#13236](https://www.github.com/tauri-apps/tauri/pull/13236)) Fix `fileAssociations` missing `LSHandlerRank` on macOS.
+
+## \[2.3.1]
+
+### Enhancements
+
+- [`a851b6597`](https://www.github.com/tauri-apps/tauri/commit/a851b6597f7e37d12f9e4632945e8466800eb5ff) ([#13057](https://www.github.com/tauri-apps/tauri/pull/13057) by [@Legend-Master](https://www.github.com/tauri-apps/tauri/../../Legend-Master)) Enhanced the description of generated docs and schema for permission sets to include list of permissions within.
+
+### Bug Fixes
+
+- [`4ae14bf2f`](https://www.github.com/tauri-apps/tauri/commit/4ae14bf2f20546c0990c48dc465832ffc46a7247) ([#13093](https://www.github.com/tauri-apps/tauri/pull/13093) by [@Legend-Master](https://www.github.com/tauri-apps/tauri/../../Legend-Master)) Suppress deprecated warning in `TrayIconConfig`'s codegen
+
+## \[2.3.0]
+
+### New Features
+
+- [`013f8f652`](https://www.github.com/tauri-apps/tauri/commit/013f8f652302f2d49c5ec0a075582033d8b074fb) ([#12890](https://www.github.com/tauri-apps/tauri/pull/12890) by [@Legend-Master](https://www.github.com/tauri-apps/tauri/../../Legend-Master)) Added `build > removeUnusedCommands` to trigger the build scripts and macros to remove unused commands based on the capabilities you defined. Note this won't be accounting for dynamically added ACLs so make sure to check it when using this.
+- [`30f5a1553`](https://www.github.com/tauri-apps/tauri/commit/30f5a1553d3c0ce460c9006764200a9210915a44) ([#12366](https://www.github.com/tauri-apps/tauri/pull/12366) by [@FabianLars](https://www.github.com/tauri-apps/tauri/../../FabianLars)) Added `trafficLightPosition` window configuration to set the traffic light buttons position on macOS.
+
+### Enhancements
+
+- [`f981a5ee8`](https://www.github.com/tauri-apps/tauri/commit/f981a5ee8b292b9ea09329f60cecc7f688dda734) ([#12602](https://www.github.com/tauri-apps/tauri/pull/12602) by [@kxxt](https://www.github.com/tauri-apps/tauri/../../kxxt)) Add basic support for linux riscv64 platform.
+
+### Bug Fixes
+
+- [`3cc4ad3c3`](https://www.github.com/tauri-apps/tauri/commit/3cc4ad3c381ee081cfcf0df28ea51507ad5c9b95) ([#12884](https://www.github.com/tauri-apps/tauri/pull/12884) by [@oscartbeaumont](https://www.github.com/tauri-apps/tauri/../../oscartbeaumont)) fix: allow double `--` in permissions as command can have double `__`
+
+### Performance Improvements
+
+- [`1cd8f55ee`](https://www.github.com/tauri-apps/tauri/commit/1cd8f55eed326d61860fee62ba2d2f4464bdcfcc) ([#13033](https://www.github.com/tauri-apps/tauri/pull/13033) by [@Legend-Master](https://www.github.com/tauri-apps/tauri/../../Legend-Master)) Don't ship global `bundle.global.js` if `app > withGlobalTauri` is set to false
+
+## \[2.2.0]
+
+### Enhancements
+
+- [`a2d36b8c3`](https://www.github.com/tauri-apps/tauri/commit/a2d36b8c34a8dcfc6736797ca5cd4665faf75e7e) ([#12181](https://www.github.com/tauri-apps/tauri/pull/12181) by [@bastiankistner](https://www.github.com/tauri-apps/tauri/../../bastiankistner)) Add an option to change the default background throttling policy (currently for WebKit only).
+
+## \[2.1.1]
+
+### Bug Fixes
+
+- [`46935212b`](https://www.github.com/tauri-apps/tauri/commit/46935212b61da44dc82dfeb803fceebf5659f7b7) ([#11658](https://www.github.com/tauri-apps/tauri/pull/11658) by [@Legend-Master](https://www.github.com/tauri-apps/tauri/../../Legend-Master)) Fix `.json5` capability files not recognized even with `config-json5` feature enabled
+
 ## \[2.1.0]
 
 ### New Features

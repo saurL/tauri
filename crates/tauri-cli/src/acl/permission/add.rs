@@ -77,6 +77,26 @@ impl TomlOrJson {
     };
   }
 
+  fn has_permission(&self, identifier: &str) -> bool {
+    (|| {
+      Some(match self {
+        TomlOrJson::Toml(t) => t
+          .get("permissions")?
+          .as_array()?
+          .iter()
+          .any(|value| value.as_str() == Some(identifier)),
+
+        TomlOrJson::Json(j) => j
+          .as_object()?
+          .get("permissions")?
+          .as_array()?
+          .iter()
+          .any(|value| value.as_str() == Some(identifier)),
+      })
+    })()
+    .unwrap_or_default()
+  }
+
   fn to_string(&self) -> Result<String> {
     Ok(match self {
       TomlOrJson::Toml(t) => t.to_string(),
@@ -166,16 +186,15 @@ pub fn command(options: Options) -> Result<()> {
 
   let capabilities = if let Some((expected_platforms, target_name)) = expected_capability_config {
     let mut capabilities = capabilities_iter
-        .filter(|(capability, _path)| {
-          capability.platforms().map_or(
-            false, /* allows any target, so we should skip it since we're adding a target-specific plugin */
-            |platforms| {
-              // all platforms must be in the expected platforms list
-              platforms.iter().all(|p| expected_platforms.contains(&p.to_string()))
-            },
-          )
+      .filter(|(capability, _path)| {
+        capability.platforms().is_some_and(|platforms| {
+          // all platforms must be in the expected platforms list
+          platforms
+            .iter()
+            .all(|p| expected_platforms.contains(&p.to_string()))
         })
-        .collect::<Vec<_>>();
+      })
+      .collect::<Vec<_>>();
 
     if capabilities.is_empty() {
       let identifier = format!("{target_name}-capability");
@@ -237,9 +256,18 @@ pub fn command(options: Options) -> Result<()> {
   }
 
   for (capability, path) in &mut capabilities {
-    capability.insert_permission(options.identifier.clone());
-    std::fs::write(&*path, capability.to_string()?)?;
-    log::info!(action = "Added"; "permission `{}` to `{}` at {}", options.identifier, capability.identifier(), dunce::simplified(path).display());
+    if capability.has_permission(&options.identifier) {
+      log::info!(
+        "Permission `{}` already found in `{}` at {}",
+        options.identifier,
+        capability.identifier(),
+        dunce::simplified(path).display()
+      );
+    } else {
+      capability.insert_permission(options.identifier.clone());
+      std::fs::write(&*path, capability.to_string()?)?;
+      log::info!(action = "Added"; "permission `{}` to `{}` at {}", options.identifier, capability.identifier(), dunce::simplified(path).display());
+    }
   }
 
   Ok(())

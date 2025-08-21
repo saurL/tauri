@@ -48,9 +48,14 @@ pub fn sign(
   log::info!(action = "Signing"; "with identity \"{}\"", keychain.signing_identity());
 
   for target in targets {
+    let entitlements_path = if target.is_an_executable {
+      settings.macos().entitlements.as_ref().map(Path::new)
+    } else {
+      None
+    };
     keychain.sign(
       &target.path,
-      settings.macos().entitlements.as_ref().map(Path::new),
+      entitlements_path,
       target.is_an_executable && settings.macos().hardened_runtime,
     )?;
   }
@@ -64,6 +69,15 @@ pub fn notarize(
   credentials: &tauri_macos_sign::AppleNotarizationCredentials,
 ) -> crate::Result<()> {
   tauri_macos_sign::notarize(keychain, &app_bundle_path, credentials).map_err(Into::into)
+}
+
+pub fn notarize_without_stapling(
+  keychain: &tauri_macos_sign::Keychain,
+  app_bundle_path: PathBuf,
+  credentials: &tauri_macos_sign::AppleNotarizationCredentials,
+) -> crate::Result<()> {
+  tauri_macos_sign::notarize_without_stapling(keychain, &app_bundle_path, credentials)
+    .map_err(Into::into)
 }
 
 #[derive(Debug, thiserror::Error)]

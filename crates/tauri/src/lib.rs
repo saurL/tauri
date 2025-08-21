@@ -2,8 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
-//! [![](https://github.com/tauri-apps/tauri/raw/dev/.github/splash.png)](https://tauri.app)
-//!
 //! Tauri is a framework for building tiny, blazing fast binaries for all major desktop platforms.
 //! Developers can integrate any front-end framework that compiles to HTML, JS and CSS for building their user interface.
 //! The backend of the application is a rust-sourced binary with an API that the front-end can interact with.
@@ -14,10 +12,11 @@
 //!
 //! - **wry** *(enabled by default)*: Enables the [wry](https://github.com/tauri-apps/wry) runtime. Only disable it if you want a custom runtime.
 //! - **common-controls-v6** *(enabled by default)*: Enables [Common Controls v6](https://learn.microsoft.com/en-us/windows/win32/controls/common-control-versions) support on Windows, mainly for the predefined `about` menu item.
+//! - **x11** *(enabled by default)*: Enables X11 support. Disable this if you only target Wayland.
 //! - **unstable**: Enables unstable features. Be careful, it might introduce breaking changes in future minor releases.
 //! - **tracing**: Enables [`tracing`](https://docs.rs/tracing/latest/tracing) for window startup, plugins, `Window::eval`, events, IPC, updater and custom protocol request handlers.
 //! - **test**: Enables the [`mod@test`] module exposing unit test helpers.
-//! - **objc-exception**: Wrap each msg_send! in a @try/@catch and panics if an exception is caught, preventing Objective-C from unwinding into Rust.
+//! - **objc-exception**: This feature flag is no-op since 2.3.0.
 //! - **linux-libxdo**: Enables linking to libxdo which enables Cut, Copy, Paste and SelectAll menu items to work on Linux.
 //! - **isolation**: Enables the isolation pattern. Enabled by default if the `app > security > pattern > use` config option is set to `isolation` on the `tauri.conf.json` file.
 //! - **custom-protocol**: Feature managed by the Tauri CLI. When enabled, Tauri assumes a production environment instead of a development one.
@@ -37,6 +36,8 @@
 //! - **image-png**: Adds support to parse `.png` image, see [`Image`].
 //! - **macos-proxy**: Adds support for [`WebviewBuilder::proxy_url`] on macOS. Requires macOS 14+.
 //! - **specta**: Add support for [`specta::specta`](https://docs.rs/specta/%5E2.0.0-rc.9/specta/attr.specta.html) with Tauri arguments such as [`State`](crate::State), [`Window`](crate::Window) and [`AppHandle`](crate::AppHandle)
+//! - **dynamic-acl** *(enabled by default)*: Enables you to add ACLs at runtime, notably it enables the [`Manager::add_capability`] function.
+//! - **push-notifications**: Add support for [Apple APNS](https://developer.apple.com/notifications/), [Windows WNS](https://learn.microsoft.com/en-us/windows/apps/windows-app-sdk/notifications/push-notifications/), and similar systems
 //!
 //! ## Cargo allowlist features
 //!
@@ -66,7 +67,9 @@ macro_rules! ios_plugin_binding {
 #[doc(hidden)]
 pub use embed_plist;
 pub use error::{Error, Result};
-use ipc::{RuntimeAuthority, RuntimeCapability};
+use ipc::RuntimeAuthority;
+#[cfg(feature = "dynamic-acl")]
+use ipc::RuntimeCapability;
 pub use resources::{Resource, ResourceId, ResourceTable};
 #[cfg(target_os = "ios")]
 #[doc(hidden)]
@@ -78,6 +81,9 @@ pub use tauri_macros::{command, generate_handler};
 
 use tauri_utils::assets::AssetsIter;
 pub use url::Url;
+
+#[cfg(feature = "push-notifications")]
+pub use app::PushToken;
 
 pub(crate) mod app;
 pub mod async_runtime;
@@ -207,21 +213,24 @@ pub use tauri_runtime_wry::webview_version;
 #[cfg_attr(docsrs, doc(cfg(target_os = "macos")))]
 pub use runtime::ActivationPolicy;
 
-#[cfg(target_os = "macos")]
 pub use self::utils::TitleBarStyle;
 
+use self::event::EventName;
 pub use self::event::{Event, EventId, EventTarget};
+use self::manager::EmitPayload;
 pub use {
   self::app::{
-    App, AppHandle, AssetResolver, Builder, CloseRequestApi, RunEvent, UriSchemeContext,
-    UriSchemeResponder, WebviewEvent, WindowEvent,
+    App, AppHandle, AssetResolver, Builder, CloseRequestApi, ExitRequestApi, RunEvent,
+    UriSchemeContext, UriSchemeResponder, WebviewEvent, WindowEvent, RESTART_EXIT_CODE,
   },
   self::manager::Asset,
   self::runtime::{
-    dpi::{LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize, Pixel, Position, Size},
-    webview::WebviewAttributes,
+    dpi::{
+      LogicalPosition, LogicalRect, LogicalSize, LogicalUnit, PhysicalPosition, PhysicalRect,
+      PhysicalSize, PhysicalUnit, Pixel, PixelUnit, Position, Rect, Size,
+    },
     window::{CursorIcon, DragDropEvent, WindowSizeConstraints},
-    DeviceEventFilter, Rect, UserAttentionType,
+    DeviceEventFilter, UserAttentionType,
   },
   self::state::{State, StateManager},
   self::utils::{
@@ -391,12 +400,32 @@ pub struct Context<R: Runtime> {
   pub(crate) plugin_global_api_scripts: Option<&'static [&'static str]>,
 }
 
+/// Temporary struct that overrides the Debug formatting for the `app_icon` field.
+///
+/// It reduces the output size compared to the default, as that would format the binary
+/// data as a slice of numbers `[65, 66, 67]`. This instead shows the length of the Vec.
+///
+/// For example: `Some([u8; 493])`
+pub(crate) struct DebugAppIcon<'a>(&'a Option<Vec<u8>>);
+
+impl std::fmt::Debug for DebugAppIcon<'_> {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    match self.0 {
+      Option::None => f.write_str("None"),
+      Option::Some(icon) => f
+        .debug_tuple("Some")
+        .field(&format_args!("[u8; {}]", icon.len()))
+        .finish(),
+    }
+  }
+}
+
 impl<R: Runtime> fmt::Debug for Context<R> {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     let mut d = f.debug_struct("Context");
     d.field("config", &self.config)
       .field("default_window_icon", &self.default_window_icon)
-      .field("app_icon", &self.app_icon)
+      .field("app_icon", &DebugAppIcon(&self.app_icon))
       .field("package_info", &self.package_info)
       .field("pattern", &self.pattern)
       .field("plugin_global_api_scripts", &self.plugin_global_api_scripts);
@@ -586,10 +615,7 @@ pub trait Manager<R: Runtime>: sealed::ManagerBase<R> {
     self.manager().get_webview(label).and_then(|webview| {
       let window = webview.window();
       if window.is_webview_window() {
-        Some(WebviewWindow {
-          window: window.clone(),
-          webview,
-        })
+        Some(WebviewWindow { window, webview })
       } else {
         None
       }
@@ -605,13 +631,7 @@ pub trait Manager<R: Runtime>: sealed::ManagerBase<R> {
       .filter_map(|(label, webview)| {
         let window = webview.window();
         if window.is_webview_window() {
-          Some((
-            label,
-            WebviewWindow {
-              window: window.clone(),
-              webview,
-            },
-          ))
+          Some((label, WebviewWindow { window, webview }))
         } else {
           None
         }
@@ -711,11 +731,31 @@ pub trait Manager<R: Runtime>: sealed::ManagerBase<R> {
   }
 
   /// Removes the state managed by the application for T. Returns the state if it was actually removed.
+  ///
+  /// <div class="warning">
+  ///
+  /// This method is *UNSAFE* and calling it will cause previously obtained references through
+  /// [Manager::state] and [State::inner] to become dangling references.
+  ///
+  /// It is currently deprecated and may be removed in the future.
+  ///
+  /// If you really want to unmanage a state, use [std::sync::Mutex] and [Option::take] to wrap the state instead.
+  ///
+  /// See [tauri-apps/tauri#12721] for more information.
+  ///
+  /// [tauri-apps/tauri#12721]: https://github.com/tauri-apps/tauri/issues/12721
+  ///
+  /// </div>
+  #[deprecated(
+    since = "2.3.0",
+    note = "This method is unsafe, since it can cause dangling references."
+  )]
   fn unmanage<T>(&self) -> Option<T>
   where
     T: Send + Sync + 'static,
   {
-    self.manager().state().unmanage()
+    // The caller decides to break the safety here, then OK, just let it go.
+    unsafe { self.manager().state().unmanage() }
   }
 
   /// Retrieves the managed state for the type `T`.
@@ -728,11 +768,12 @@ pub trait Manager<R: Runtime>: sealed::ManagerBase<R> {
   where
     T: Send + Sync + 'static,
   {
-    self
-      .manager()
-      .state
-      .try_get()
-      .expect("state() called before manage() for given type")
+    self.manager().state.try_get().unwrap_or_else(|| {
+      panic!(
+        "state() called before manage() for {}",
+        std::any::type_name::<T>()
+      )
+    })
   }
 
   /// Attempts to retrieve the managed state for the type `T`.
@@ -806,6 +847,7 @@ pub trait Manager<R: Runtime>: sealed::ManagerBase<R> {
   ///
   /// [`tauri.conf.json > app > security > capabilities`]: https://tauri.app/reference/config/#capabilities
   /// [tauri_build::Attributes::capabilities_path_pattern]: https://docs.rs/tauri-build/2/tauri_build/struct.Attributes.html#method.capabilities_path_pattern
+  #[cfg(feature = "dynamic-acl")]
   fn add_capability(&self, capability: impl RuntimeCapability) -> Result<()> {
     self
       .manager()
@@ -839,6 +881,8 @@ pub trait Listener<R: Runtime>: sealed::ManagerBase<R> {
   ///   })
   ///   .invoke_handler(tauri::generate_handler![synchronize]);
   /// ```
+  /// # Panics
+  /// Will panic if `event` contains characters other than alphanumeric, `-`, `/`, `:` and `_`
   fn listen<F>(&self, event: impl Into<String>, handler: F) -> EventId
   where
     F: Fn(Event) + Send + 'static;
@@ -846,6 +890,8 @@ pub trait Listener<R: Runtime>: sealed::ManagerBase<R> {
   /// Listen to an event on this manager only once.
   ///
   /// See [`Self::listen`] for more information.
+  /// # Panics
+  /// Will panic if `event` contains characters other than alphanumeric, `-`, `/`, `:` and `_`
   fn once<F>(&self, event: impl Into<String>, handler: F) -> EventId
   where
     F: FnOnce(Event) + Send + 'static;
@@ -897,23 +943,27 @@ pub trait Listener<R: Runtime>: sealed::ManagerBase<R> {
   ///   })
   ///   .invoke_handler(tauri::generate_handler![synchronize]);
   /// ```
+  /// # Panics
+  /// Will panic if `event` contains characters other than alphanumeric, `-`, `/`, `:` and `_`
   fn listen_any<F>(&self, event: impl Into<String>, handler: F) -> EventId
   where
     F: Fn(Event) + Send + 'static,
   {
-    self
-      .manager()
-      .listen(event.into(), EventTarget::Any, handler)
+    let event = EventName::new(event.into()).unwrap();
+    self.manager().listen(event, EventTarget::Any, handler)
   }
 
   /// Listens once to an emitted event to any [target](EventTarget) .
   ///
   /// See [`Self::listen_any`] for more information.
+  /// # Panics
+  /// Will panic if `event` contains characters other than alphanumeric, `-`, `/`, `:` and `_`
   fn once_any<F>(&self, event: impl Into<String>, handler: F) -> EventId
   where
     F: FnOnce(Event) + Send + 'static,
   {
-    self.manager().once(event.into(), EventTarget::Any, handler)
+    let event = EventName::new(event.into()).unwrap();
+    self.manager().once(event, EventTarget::Any, handler)
   }
 }
 
@@ -931,7 +981,18 @@ pub trait Emitter<R: Runtime>: sealed::ManagerBase<R> {
   ///   app.emit("synchronized", ());
   /// }
   /// ```
-  fn emit<S: Serialize + Clone>(&self, event: &str, payload: S) -> Result<()>;
+  fn emit<S: Serialize + Clone>(&self, event: &str, payload: S) -> Result<()> {
+    let event = EventName::new(event)?;
+    let payload = EmitPayload::Serialize(&payload);
+    self.manager().emit(event, payload)
+  }
+
+  /// Similar to [`Emitter::emit`] but the payload is json serialized.
+  fn emit_str(&self, event: &str, payload: String) -> Result<()> {
+    let event = EventName::new(event)?;
+    let payload = EmitPayload::<()>::Str(payload);
+    self.manager().emit(event, payload)
+  }
 
   /// Emits an event to all [targets](EventTarget) matching the given target.
   ///
@@ -958,7 +1019,22 @@ pub trait Emitter<R: Runtime>: sealed::ManagerBase<R> {
   fn emit_to<I, S>(&self, target: I, event: &str, payload: S) -> Result<()>
   where
     I: Into<EventTarget>,
-    S: Serialize + Clone;
+    S: Serialize + Clone,
+  {
+    let event = EventName::new(event)?;
+    let payload = EmitPayload::Serialize(&payload);
+    self.manager().emit_to(target.into(), event, payload)
+  }
+
+  /// Similar to [`Emitter::emit_to`] but the payload is json serialized.
+  fn emit_str_to<I>(&self, target: I, event: &str, payload: String) -> Result<()>
+  where
+    I: Into<EventTarget>,
+  {
+    let event = EventName::new(event)?;
+    let payload = EmitPayload::<()>::Str(payload);
+    self.manager().emit_to(target.into(), event, payload)
+  }
 
   /// Emits an event to all [targets](EventTarget) based on the given filter.
   ///
@@ -981,7 +1057,22 @@ pub trait Emitter<R: Runtime>: sealed::ManagerBase<R> {
   fn emit_filter<S, F>(&self, event: &str, payload: S, filter: F) -> Result<()>
   where
     S: Serialize + Clone,
-    F: Fn(&EventTarget) -> bool;
+    F: Fn(&EventTarget) -> bool,
+  {
+    let event = EventName::new(event)?;
+    let payload = EmitPayload::Serialize(&payload);
+    self.manager().emit_filter(event, payload, filter)
+  }
+
+  /// Similar to [`Emitter::emit_filter`] but the payload is json serialized.
+  fn emit_str_filter<F>(&self, event: &str, payload: String, filter: F) -> Result<()>
+  where
+    F: Fn(&EventTarget) -> bool,
+  {
+    let event = EventName::new(event)?;
+    let payload = EmitPayload::<()>::Str(payload);
+    self.manager().emit_filter(event, payload, filter)
+  }
 }
 
 /// Prevent implementation details from leaking out of the [`Manager`] trait.
@@ -1046,7 +1137,7 @@ pub mod test;
 const _: () = {
   use specta::{datatype::DataType, function::FunctionArg, TypeMap};
 
-  impl<'r, T: Send + Sync + 'static> FunctionArg for crate::State<'r, T> {
+  impl<T: Send + Sync + 'static> FunctionArg for crate::State<'_, T> {
     fn to_datatype(_: &mut TypeMap) -> Option<DataType> {
       None
     }
@@ -1192,6 +1283,6 @@ mod z85 {
 /// [Z85]: https://rfc.zeromq.org/spec/32/
 pub(crate) fn generate_invoke_key() -> Result<String> {
   let mut bytes = [0u8; 16];
-  getrandom::getrandom(&mut bytes)?;
+  getrandom::fill(&mut bytes)?;
   Ok(z85::encode(&bytes))
 }

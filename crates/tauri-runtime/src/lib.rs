@@ -2,8 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
-//! [![](https://github.com/tauri-apps/tauri/raw/dev/.github/splash.png)](https://tauri.app)
-//!
 //! Internal runtime between Tauri and the underlying webview runtime.
 //!
 //! None of the exposed API of this crate is stable, and it may break semver
@@ -16,19 +14,21 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 use raw_window_handle::DisplayHandle;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::{borrow::Cow, fmt::Debug, sync::mpsc::Sender};
 use tauri_utils::config::Color;
 use tauri_utils::Theme;
 use url::Url;
 use webview::{DetachedWebview, PendingWebview};
 
+/// UI scaling utilities.
+pub mod dpi;
 /// Types useful for interacting with a user's monitors.
 pub mod monitor;
 pub mod webview;
 pub mod window;
 
-use dpi::{PhysicalPosition, PhysicalSize, Position, Size};
+use dpi::{PhysicalPosition, PhysicalSize, Position, Rect, Size};
 use monitor::Monitor;
 use window::{
   CursorIcon, DetachedWindow, PendingWindow, RawWindow, WebviewEvent, WindowEvent,
@@ -42,29 +42,12 @@ use http::{
   status::InvalidStatusCode,
 };
 
-/// UI scaling utilities.
-pub use dpi;
+/// Cookie extraction
+pub use cookie::Cookie;
 
 pub type WindowEventId = u32;
 pub type WebviewEventId = u32;
-
-/// A rectangular region.
-#[derive(Clone, Copy, Debug, Serialize)]
-pub struct Rect {
-  /// Rect position.
-  pub position: dpi::Position,
-  /// Rect size.
-  pub size: dpi::Size,
-}
-
-impl Default for Rect {
-  fn default() -> Self {
-    Self {
-      position: Position::Logical((0, 0).into()),
-      size: Size::Logical((0, 0).into()),
-    }
-  }
-}
+pub type PushToken = Vec<u8>;
 
 /// Progress bar status.
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -144,6 +127,7 @@ pub enum Error {
   /// Failed to create webview.
   #[error("failed to create webview: {0}")]
   CreateWebview(Box<dyn std::error::Error + Send + Sync>),
+  // TODO: Make it take an error like `CreateWebview` in v3
   /// Failed to create window.
   #[error("failed to create window")]
   CreateWindow,
@@ -184,6 +168,11 @@ pub enum Error {
   InvalidProxyUrl,
   #[error("window not found")]
   WindowNotFound,
+  #[cfg(any(target_os = "macos", target_os = "ios"))]
+  #[error("failed to remove data store")]
+  FailedToRemoveDataStore,
+  #[error("Could not find the webview runtime, make sure it is installed")]
+  WebviewRuntimeNotInstalled,
 }
 
 /// Result type.
@@ -237,7 +226,7 @@ pub enum RunEvent<T: UserEvent> {
   Resumed,
   /// Emitted when all of the event loop's input events have been processed and redraw processing is about to begin.
   ///
-  /// This event is useful as a place to put your code that should be run after all state-changing events have been handled and you want to do stuff (updating state, performing calculations, etc) that happens as the “main body” of your event loop.
+  /// This event is useful as a place to put your code that should be run after all state-changing events have been handled and you want to do stuff (updating state, performing calculations, etc) that happens as the "main body" of your event loop.
   MainEventsCleared,
   /// Emitted when the user wants to open the specified resource with the app.
   #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -248,6 +237,12 @@ pub enum RunEvent<T: UserEvent> {
     /// Indicates whether the NSApplication object found any visible windows in your application.
     has_visible_windows: bool,
   },
+  /// Push token was registered.
+  #[cfg(feature = "push-notifications")]
+  PushRegistration(PushToken),
+  /// Push token failure.
+  #[cfg(feature = "push-notifications")]
+  PushRegistrationFailed(String),
   /// A custom event defined by the user.
   UserEvent(T),
 }
@@ -284,6 +279,11 @@ pub trait RuntimeHandle<T: UserEvent>: Debug + Clone + Send + Sync + Sized + 'st
   #[cfg_attr(docsrs, doc(cfg(target_os = "macos")))]
   fn set_activation_policy(&self, activation_policy: ActivationPolicy) -> Result<()>;
 
+  /// Sets the dock visibility for the application.
+  #[cfg(target_os = "macos")]
+  #[cfg_attr(docsrs, doc(cfg(target_os = "macos")))]
+  fn set_dock_visibility(&self, visible: bool) -> Result<()>;
+
   /// Requests an exit of the event loop.
   fn request_exit(&self, code: i32) -> Result<()>;
 
@@ -291,7 +291,7 @@ pub trait RuntimeHandle<T: UserEvent>: Debug + Clone + Send + Sync + Sized + 'st
   fn create_window<F: Fn(RawWindow) + Send + 'static>(
     &self,
     pending: PendingWindow<T, Self::Runtime>,
-    before_window_creation: Option<F>,
+    after_window_creation: Option<F>,
   ) -> Result<DetachedWindow<T, Self::Runtime>>;
 
   /// Create a new webview.
@@ -304,14 +304,26 @@ pub trait RuntimeHandle<T: UserEvent>: Debug + Clone + Send + Sync + Sized + 'st
   /// Run a task on the main thread.
   fn run_on_main_thread<F: FnOnce() + Send + 'static>(&self, f: F) -> Result<()>;
 
-  fn display_handle(&self) -> std::result::Result<DisplayHandle, raw_window_handle::HandleError>;
+  /// Get a handle to the display controller of the windowing system.
+  fn display_handle(
+    &self,
+  ) -> std::result::Result<DisplayHandle<'_>, raw_window_handle::HandleError>;
 
+  /// Returns the primary monitor of the system.
+  ///
+  /// Returns None if it can't identify any monitor as a primary one.
   fn primary_monitor(&self) -> Option<Monitor>;
+
+  /// Returns the monitor that contains the given point.
   fn monitor_from_point(&self, x: f64, y: f64) -> Option<Monitor>;
+
+  /// Returns the list of all the monitors available on the system.
   fn available_monitors(&self) -> Vec<Monitor>;
 
+  /// Get the cursor position relative to the top-left hand corner of the desktop.
   fn cursor_position(&self) -> Result<PhysicalPosition<f64>>;
 
+  /// Sets the app theme.
   fn set_theme(&self, theme: Option<Theme>);
 
   /// Shows the application, but does not automatically focus it.
@@ -323,6 +335,15 @@ pub trait RuntimeHandle<T: UserEvent>: Debug + Clone + Send + Sync + Sized + 'st
   #[cfg(target_os = "macos")]
   #[cfg_attr(docsrs, doc(cfg(target_os = "macos")))]
   fn hide(&self) -> Result<()>;
+
+  /// Change the device event filter mode.
+  ///
+  /// See [Runtime::set_device_event_filter] for details.
+  ///
+  /// ## Platform-specific
+  ///
+  /// See [Runtime::set_device_event_filter] for details.
+  fn set_device_event_filter(&self, filter: DeviceEventFilter);
 
   /// Finds an Android class in the project scope.
   #[cfg(target_os = "android")]
@@ -340,6 +361,21 @@ pub trait RuntimeHandle<T: UserEvent>: Debug + Clone + Send + Sync + Sized + 'st
   fn run_on_android_context<F>(&self, f: F)
   where
     F: FnOnce(&mut jni::JNIEnv, &jni::objects::JObject, &jni::objects::JObject) + Send + 'static;
+
+  #[cfg(any(target_os = "macos", target_os = "ios"))]
+  #[cfg_attr(docsrs, doc(cfg(any(target_os = "macos", target_os = "ios"))))]
+  fn fetch_data_store_identifiers<F: FnOnce(Vec<[u8; 16]>) + Send + 'static>(
+    &self,
+    cb: F,
+  ) -> Result<()>;
+
+  #[cfg(any(target_os = "macos", target_os = "ios"))]
+  #[cfg_attr(docsrs, doc(cfg(any(target_os = "macos", target_os = "ios"))))]
+  fn remove_data_store<F: FnOnce(Result<()>) + Send + 'static>(
+    &self,
+    uuid: [u8; 16],
+    cb: F,
+  ) -> Result<()>;
 }
 
 pub trait EventLoopProxy<T: UserEvent>: Debug + Clone + Send + Sync {
@@ -399,18 +435,32 @@ pub trait Runtime<T: UserEvent>: Debug + Sized + 'static {
     pending: PendingWebview<T, Self>,
   ) -> Result<DetachedWebview<T, Self>>;
 
+  /// Returns the primary monitor of the system.
+  ///
+  /// Returns None if it can't identify any monitor as a primary one.
   fn primary_monitor(&self) -> Option<Monitor>;
+
+  /// Returns the monitor that contains the given point.
   fn monitor_from_point(&self, x: f64, y: f64) -> Option<Monitor>;
+
+  /// Returns the list of all the monitors available on the system.
   fn available_monitors(&self) -> Vec<Monitor>;
 
+  /// Get the cursor position relative to the top-left hand corner of the desktop.
   fn cursor_position(&self) -> Result<PhysicalPosition<f64>>;
 
+  /// Sets the app theme.
   fn set_theme(&self, theme: Option<Theme>);
 
   /// Sets the activation policy for the application.
   #[cfg(target_os = "macos")]
   #[cfg_attr(docsrs, doc(cfg(target_os = "macos")))]
   fn set_activation_policy(&mut self, activation_policy: ActivationPolicy);
+
+  /// Sets the dock visibility for the application.
+  #[cfg(target_os = "macos")]
+  #[cfg_attr(docsrs, doc(cfg(target_os = "macos")))]
+  fn set_dock_visibility(&mut self, visible: bool);
 
   /// Shows the application, but does not automatically focus it.
   #[cfg(target_os = "macos")]
@@ -438,6 +488,9 @@ pub trait Runtime<T: UserEvent>: Debug + Sized + 'static {
   /// Runs an iteration of the runtime event loop and returns control flow to the caller.
   #[cfg(desktop)]
   fn run_iteration<F: FnMut(RunEvent<T>) + 'static>(&mut self, callback: F);
+
+  /// Equivalent to [`Runtime::run`] but returns the exit code instead of exiting the process.
+  fn run_return<F: FnMut(RunEvent<T>) + 'static>(self, callback: F) -> i32;
 
   /// Run the webview runtime.
   fn run<F: FnMut(RunEvent<T>) + 'static>(self, callback: F);
@@ -488,6 +541,9 @@ pub trait WebviewDispatch<T: UserEvent>: Debug + Clone + Send + Sync + Sized + '
   /// Navigate to the given URL.
   fn navigate(&self, url: Url) -> Result<()>;
 
+  /// Reloads the current page.
+  fn reload(&self) -> Result<()>;
+
   /// Opens the dialog to prints the contents of the webview.
   fn print(&self) -> Result<()>;
 
@@ -517,6 +573,35 @@ pub trait WebviewDispatch<T: UserEvent>: Debug + Clone + Send + Sync + Sized + '
 
   /// Moves the webview to the given window.
   fn reparent(&self, window_id: WindowId) -> Result<()>;
+
+  /// Get cookies for a particular url.
+  ///
+  /// # Stability
+  ///
+  /// See [WebviewDispatch::cookies].
+  fn cookies_for_url(&self, url: Url) -> Result<Vec<Cookie<'static>>>;
+
+  /// Return all cookies in the cookie store.
+  ///
+  /// # Stability
+  ///
+  /// The return value of this function leverages [`cookie::Cookie`] which re-exports the cookie crate.
+  /// This dependency might receive updates in minor Tauri releases.
+  fn cookies(&self) -> Result<Vec<Cookie<'static>>>;
+
+  /// Set a cookie for the webview.
+  ///
+  /// # Stability
+  ///
+  /// See [WebviewDispatch::cookies].
+  fn set_cookie(&self, cookie: cookie::Cookie<'_>) -> Result<()>;
+
+  /// Delete a cookie for the webview.
+  ///
+  /// # Stability
+  ///
+  /// See [WebviewDispatch::cookies].
+  fn delete_cookie(&self, cookie: cookie::Cookie<'_>) -> Result<()>;
 
   /// Sets whether the webview should automatically grow and shrink its size and position when the parent window resizes.
   fn set_auto_resize(&self, auto_resize: bool) -> Result<()>;
@@ -610,6 +695,13 @@ pub trait WindowDispatch<T: UserEvent>: Debug + Clone + Send + Sync + Sized + 's
 
   /// Whether the window is enabled or disable.
   fn is_enabled(&self) -> Result<bool>;
+
+  /// Gets the window alwaysOnTop flag state.
+  ///
+  /// ## Platform-specific
+  ///
+  /// - **iOS / Android:** Unsupported.
+  fn is_always_on_top(&self) -> Result<bool>;
 
   /// Gets the window's current title.
   fn title(&self) -> Result<String>;
@@ -781,8 +873,14 @@ pub trait WindowDispatch<T: UserEvent>: Debug + Clone + Send + Sync + Sized + 's
   /// Updates the window fullscreen state.
   fn set_fullscreen(&self, fullscreen: bool) -> Result<()>;
 
+  #[cfg(target_os = "macos")]
+  fn set_simple_fullscreen(&self, enable: bool) -> Result<()>;
+
   /// Bring the window to front and focus.
   fn set_focus(&self) -> Result<()>;
+
+  /// Sets whether the window can be focused.
+  fn set_focusable(&self, focusable: bool) -> Result<()>;
 
   /// Updates the window icon.
   fn set_icon(&self, icon: Icon) -> Result<()>;
@@ -816,6 +914,24 @@ pub trait WindowDispatch<T: UserEvent>: Debug + Clone + Send + Sync + Sized + 's
   /// Starts resize-dragging the window.
   fn start_resize_dragging(&self, direction: ResizeDirection) -> Result<()>;
 
+  /// Sets the badge count on the taskbar
+  /// The badge count appears as a whole for the application
+  /// Using `0` or using `None` will remove the badge
+  ///
+  /// ## Platform-specific
+  /// - **Windows:** Unsupported, use [`WindowDispatch::set_overlay_icon`] instead.
+  /// - **Android:** Unsupported.
+  /// - **iOS:** iOS expects i32, if the value is larger than i32::MAX, it will be clamped to i32::MAX.
+  fn set_badge_count(&self, count: Option<i64>, desktop_filename: Option<String>) -> Result<()>;
+
+  /// Sets the badge count on the taskbar **macOS only**. Using `None` will remove the badge
+  fn set_badge_label(&self, label: Option<String>) -> Result<()>;
+
+  /// Sets the overlay icon on the taskbar **Windows only**. Using `None` will remove the icon
+  ///
+  /// The overlay icon can be unique for each window.
+  fn set_overlay_icon(&self, icon: Option<Icon>) -> Result<()>;
+
   /// Sets the taskbar progress state.
   ///
   /// ## Platform-specific
@@ -830,6 +946,15 @@ pub trait WindowDispatch<T: UserEvent>: Debug + Clone + Send + Sync + Sized + 's
   ///
   /// - **Linux / Windows / iOS / Android:** Unsupported.
   fn set_title_bar_style(&self, style: tauri_utils::TitleBarStyle) -> Result<()>;
+
+  /// Change the position of the window controls. Available on macOS only.
+  ///
+  /// Requires titleBarStyle: Overlay and decorations: true.
+  ///
+  /// ## Platform-specific
+  ///
+  /// - **Linux / Windows / iOS / Android:** Unsupported.
+  fn set_traffic_light_position(&self, position: Position) -> Result<()>;
 
   /// Sets the theme for this window.
   ///

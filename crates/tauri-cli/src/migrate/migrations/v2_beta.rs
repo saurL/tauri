@@ -72,7 +72,7 @@ fn migrate_npm_dependencies(frontend_dir: &Path) -> Result<()> {
       .unwrap_or_default()
       .unwrap_or_default();
     if version.starts_with('1') {
-      install_deps.push(format!("{pkg}@^2.0.0-rc.0"));
+      install_deps.push(format!("{pkg}@^2.0.0"));
     }
   }
 
@@ -99,7 +99,7 @@ fn migrate_permissions(tauri_dir: &Path) -> Result<()> {
   for entry in walkdir::WalkDir::new(tauri_dir.join("capabilities")) {
     let entry = entry?;
     let path = entry.path();
-    if path.extension().map_or(false, |ext| ext == "json") {
+    if path.extension().is_some_and(|ext| ext == "json") {
       let mut capability = read_to_string(path).context("failed to read capability")?;
       for plugin in core_plugins {
         capability = capability.replace(&format!("\"{plugin}:"), &format!("\"core:{plugin}:"));
@@ -111,7 +111,7 @@ fn migrate_permissions(tauri_dir: &Path) -> Result<()> {
 }
 
 fn migrate_manifest(manifest: &mut DocumentMut) -> Result<()> {
-  let version = "2.0.0-rc.0";
+  let version = "2.0.0";
 
   let dependencies = manifest
     .as_table_mut()

@@ -6,7 +6,7 @@
 
 use std::{
   borrow::Cow,
-  path::PathBuf,
+  path::{Path, PathBuf},
   sync::{Arc, MutexGuard},
 };
 
@@ -14,8 +14,9 @@ use crate::{
   event::EventTarget,
   ipc::ScopeObject,
   runtime::dpi::{PhysicalPosition, PhysicalSize},
+  webview::NewWindowResponse,
   window::Monitor,
-  Emitter, Listener, ResourceTable, Window,
+  Emitter, EventName, Listener, ResourceTable, Window,
 };
 #[cfg(desktop)]
 use crate::{
@@ -27,19 +28,15 @@ use crate::{
     UserAttentionType,
   },
 };
-use serde::Serialize;
-use tauri_utils::{
-  config::{Color, WebviewUrl, WindowConfig},
-  Theme,
-};
+use tauri_runtime::webview::NewWindowFeatures;
+use tauri_utils::config::{BackgroundThrottlingPolicy, Color, WebviewUrl, WindowConfig};
 use url::Url;
 
 use crate::{
   ipc::{CommandArg, CommandItem, InvokeError, OwnedInvokeResponder},
   manager::AppManager,
   sealed::{ManagerBase, RuntimeOrDispatch},
-  webview::PageLoadPayload,
-  webview::WebviewBuilder,
+  webview::{Cookie, PageLoadPayload, WebviewBuilder, WebviewEvent},
   window::WindowBuilder,
   AppHandle, Event, EventId, Manager, Runtime, Webview, WindowEvent,
 };
@@ -62,8 +59,8 @@ impl<'a, R: Runtime, M: Manager<R>> WebviewWindowBuilder<'a, R, M> {
   ///
   /// # Known issues
   ///
-  /// On Windows, this function deadlocks when used in a synchronous command, see [the Webview2 issue].
-  /// You should use `async` commands when creating windows.
+  /// On Windows, this function deadlocks when used in a synchronous command and event handlers, see [the Webview2 issue].
+  /// You should use `async` commands and separate threads when creating windows.
   ///
   /// # Examples
   ///
@@ -115,12 +112,12 @@ impl<'a, R: Runtime, M: Manager<R>> WebviewWindowBuilder<'a, R, M> {
 
   /// Initializes a webview window builder from a [`WindowConfig`] from tauri.conf.json.
   /// Keep in mind that you can't create 2 windows with the same `label` so make sure
-  /// that the initial window was closed or change the label of the new [`WebviewWindowBuilder`].
+  /// that the initial window was closed or change the label of the cloned [`WindowConfig`].
   ///
   /// # Known issues
   ///
-  /// On Windows, this function deadlocks when used in a synchronous command, see [the Webview2 issue].
-  /// You should use `async` commands when creating windows.
+  /// On Windows, this function deadlocks when used in a synchronous command or event handlers, see [the Webview2 issue].
+  /// You should use `async` commands and separate threads when creating windows.
   ///
   /// # Examples
   ///
@@ -129,7 +126,24 @@ impl<'a, R: Runtime, M: Manager<R>> WebviewWindowBuilder<'a, R, M> {
   /// ```
   /// #[tauri::command]
   /// async fn reopen_window(app: tauri::AppHandle) {
-  ///   let webview_window = tauri::WebviewWindowBuilder::from_config(&app, &app.config().app.windows.get(0).unwrap().clone())
+  ///   let webview_window = tauri::WebviewWindowBuilder::from_config(&app, &app.config().app.windows.get(0).unwrap())
+  ///     .unwrap()
+  ///     .build()
+  ///     .unwrap();
+  /// }
+  /// ```
+  ///
+  /// - Create a window in a command from a config with a specific label, and change its label so multiple instances can exist:
+  ///
+  /// ```
+  /// #[tauri::command]
+  /// async fn open_window_multiple(app: tauri::AppHandle) {
+  ///   let mut conf = app.config().app.windows.iter().find(|c| c.label == "template-for-multiwindow").unwrap().clone();
+  ///   // This should be a unique label for all windows. For example, we can use a random suffix:
+  ///   let mut buf = [0u8; 1];
+  ///   assert_eq!(getrandom::fill(&mut buf), Ok(()));
+  ///   conf.label = format!("my-multiwindow-{}", buf[0]);
+  ///   let webview_window = tauri::WebviewWindowBuilder::from_config(&app, &conf)
   ///     .unwrap()
   ///     .build()
   ///     .unwrap();
@@ -255,6 +269,82 @@ impl<'a, R: Runtime, M: Manager<R>> WebviewWindowBuilder<'a, R, M> {
   /// ```
   pub fn on_navigation<F: Fn(&Url) -> bool + Send + 'static>(mut self, f: F) -> Self {
     self.webview_builder = self.webview_builder.on_navigation(f);
+    self
+  }
+
+  /// Set a new window request handler to decide if incoming url is allowed to be opened.
+  ///
+  /// A new window is requested to be opened by the [window.open] API.
+  ///
+  /// The closure take the URL to open and the window features object and returns [`NewWindowResponse`] to determine whether the window should open.
+  ///
+  /// # Examples
+  /// ```rust,no_run
+  /// use tauri::{
+  ///   utils::config::WebviewUrl,
+  ///   webview::WebviewWindowBuilder,
+  /// };
+  /// use http::header::HeaderValue;
+  /// use std::collections::HashMap;
+  /// tauri::Builder::default()
+  ///   .setup(|app| {
+  ///     let app_ = app.handle().clone();
+  ///     let webview_window = WebviewWindowBuilder::new(app, "core", WebviewUrl::App("index.html".into()))
+  ///       .on_new_window(move |url, features| {
+  ///         let builder = tauri::WebviewWindowBuilder::new(
+  ///           &app_,
+  ///           // note: add an ID counter or random label generator to support multiple opened windows at the same time
+  ///           "opened-window",
+  ///           tauri::WebviewUrl::External("about:blank".parse().unwrap()),
+  ///         )
+  ///         .window_features(features)
+  ///         .on_document_title_changed(|window, title| {
+  ///           window.set_title(&title).unwrap();
+  ///         })
+  ///         .title(url.as_str());
+  ///
+  ///         let window = builder.build().unwrap();
+  ///         tauri::webview::NewWindowResponse::Create { window }
+  ///       })
+  ///       .build()?;
+  ///     Ok(())
+  ///   });
+  /// ```
+  ///
+  /// # Platform-specific
+  ///
+  /// - **Android / iOS**: Not supported.
+  /// - **Windows**: The closure is executed on a separate thread to prevent a deadlock.
+  ///
+  /// [window.open]: https://developer.mozilla.org/en-US/docs/Web/API/Window/open
+  pub fn on_new_window<
+    F: Fn(Url, NewWindowFeatures) -> NewWindowResponse<R> + Send + Sync + 'static,
+  >(
+    mut self,
+    f: F,
+  ) -> Self {
+    self.webview_builder = self.webview_builder.on_new_window(f);
+    self
+  }
+
+  /// Defines a closure to be executed when the document title changes.
+  ///
+  /// Note that it may run before or after the navigation event.
+  pub fn on_document_title_changed<F: Fn(WebviewWindow<R>, String) + Send + 'static>(
+    mut self,
+    f: F,
+  ) -> Self {
+    self.webview_builder = self
+      .webview_builder
+      .on_document_title_changed(move |webview, url| {
+        f(
+          WebviewWindow {
+            window: webview.window(),
+            webview,
+          },
+          url,
+        )
+      });
     self
   }
 
@@ -413,6 +503,34 @@ impl<'a, R: Runtime, M: Manager<R>> WebviewWindowBuilder<'a, R, M> {
     self
   }
 
+  /// Prevent the window from overflowing the working area (e.g. monitor size - taskbar size)
+  /// on creation, which means the window size will be limited to `monitor size - taskbar size`
+  ///
+  /// **NOTE**: The overflow check is only performed on window creation, resizes can still overflow
+  ///
+  /// ## Platform-specific
+  ///
+  /// - **iOS / Android:** Unsupported.
+  #[must_use]
+  pub fn prevent_overflow(mut self) -> Self {
+    self.window_builder = self.window_builder.prevent_overflow();
+    self
+  }
+
+  /// Prevent the window from overflowing the working area (e.g. monitor size - taskbar size)
+  /// on creation with a margin, which means the window size will be limited to `monitor size - taskbar size - margin size`
+  ///
+  /// **NOTE**: The overflow check is only performed on window creation, resizes can still overflow
+  ///
+  /// ## Platform-specific
+  ///
+  /// - **iOS / Android:** Unsupported.
+  #[must_use]
+  pub fn prevent_overflow_with_margin(mut self, margin: impl Into<Size>) -> Self {
+    self.window_builder = self.window_builder.prevent_overflow_with_margin(margin);
+    self
+  }
+
   /// Whether the window is resizable or not.
   /// When resizable is set to false, native window's maximize button is automatically disabled.
   #[must_use]
@@ -481,6 +599,13 @@ impl<'a, R: Runtime, M: Manager<R>> WebviewWindowBuilder<'a, R, M> {
   pub fn focus(mut self) -> Self {
     self.window_builder = self.window_builder.focused(true);
     self.webview_builder = self.webview_builder.focused(true);
+    self
+  }
+
+  /// Whether the window will be focusable or not.
+  #[must_use]
+  pub fn focusable(mut self, focusable: bool) -> Self {
+    self.window_builder = self.window_builder.focusable(focusable);
     self
   }
 
@@ -707,6 +832,35 @@ impl<'a, R: Runtime, M: Manager<R>> WebviewWindowBuilder<'a, R, M> {
     self
   }
 
+  /// Change the position of the window controls on macOS.
+  ///
+  /// Requires titleBarStyle: Overlay and decorations: true.
+  #[cfg(target_os = "macos")]
+  #[must_use]
+  pub fn traffic_light_position<P: Into<Position>>(mut self, position: P) -> Self {
+    self.webview_builder.webview_attributes = self
+      .webview_builder
+      .webview_attributes
+      .traffic_light_position(position.into());
+    self
+  }
+
+  /// Whether to show a link preview when long pressing on links. Available on macOS and iOS only.
+  ///
+  /// Default is true.
+  ///
+  /// See https://docs.rs/objc2-web-kit/latest/objc2_web_kit/struct.WKWebView.html#method.allowsLinkPreview
+  ///
+  /// ## Platform-specific
+  ///
+  /// - **Linux / Windows / Android:** Unsupported.
+  #[cfg(target_os = "macos")]
+  #[must_use]
+  pub fn allow_link_preview(mut self, allow_link_preview: bool) -> Self {
+    self.webview_builder = self.webview_builder.allow_link_preview(allow_link_preview);
+    self
+  }
+
   /// Hide the window title.
   #[cfg(target_os = "macos")]
   #[must_use]
@@ -743,7 +897,7 @@ impl<'a, R: Runtime, M: Manager<R>> WebviewWindowBuilder<'a, R, M> {
 }
 
 /// Webview attributes.
-impl<'a, R: Runtime, M: Manager<R>> WebviewWindowBuilder<'a, R, M> {
+impl<R: Runtime, M: Manager<R>> WebviewWindowBuilder<'_, R, M> {
   /// Sets whether clicking an inactive window also clicks through to the webview.
   #[must_use]
   pub fn accept_first_mouse(mut self, accept: bool) -> Self {
@@ -754,14 +908,22 @@ impl<'a, R: Runtime, M: Manager<R>> WebviewWindowBuilder<'a, R, M> {
   /// Adds the provided JavaScript to a list of scripts that should be run after the global object has been created,
   /// but before the HTML document has been parsed and before any other script included by the HTML document is run.
   ///
-  /// Since it runs on all top-level document and child frame page navigations,
+  /// Since it runs on all top-level document navigations,
   /// it's recommended to check the `window.location` to guard your script from running on unexpected origins.
+  ///
+  /// This is executed only on the main frame.
+  /// If you only want to run it in all frames, use [Self::initialization_script_for_all_frames] instead.
+  ///
+  /// ## Platform-specific
+  ///
+  /// - **Windows:** scripts are always added to subframes.
+  /// - **Android:** When [addDocumentStartJavaScript] is not supported,
+  ///   we prepend initialization scripts to each HTML head (implementation only supported on custom protocol URLs).
+  ///   For remote URLs, we use [onPageStarted] which is not guaranteed to run before other scripts.
   ///
   /// # Examples
   ///
   /// ```rust
-  /// use tauri::{WebviewWindowBuilder, Runtime};
-  ///
   /// const INIT_SCRIPT: &str = r#"
   ///   if (window.location.origin === 'https://tauri.app') {
   ///     console.log("hello world from js init script");
@@ -781,8 +943,52 @@ impl<'a, R: Runtime, M: Manager<R>> WebviewWindowBuilder<'a, R, M> {
   /// }
   /// ```
   #[must_use]
-  pub fn initialization_script(mut self, script: &str) -> Self {
+  pub fn initialization_script(mut self, script: impl Into<String>) -> Self {
     self.webview_builder = self.webview_builder.initialization_script(script);
+    self
+  }
+
+  /// Adds the provided JavaScript to a list of scripts that should be run after the global object has been created,
+  /// but before the HTML document has been parsed and before any other script included by the HTML document is run.
+  ///
+  /// Since it runs on all top-level document navigations and also child frame page navigations,
+  /// it's recommended to check the `window.location` to guard your script from running on unexpected origins.
+  ///
+  /// This is executed on all frames (main frame and also sub frames).
+  /// If you only want to run the script in the main frame, use [Self::initialization_script] instead.
+  ///
+  /// ## Platform-specific
+  ///
+  /// - **Android:** When [addDocumentStartJavaScript] is not supported,
+  ///   we prepend initialization scripts to each HTML head (implementation only supported on custom protocol URLs).
+  ///   For remote URLs, we use [onPageStarted] which is not guaranteed to run before other scripts.
+  ///
+  /// # Examples
+  ///
+  /// ```rust
+  /// const INIT_SCRIPT: &str = r#"
+  ///   if (window.location.origin === 'https://tauri.app') {
+  ///     console.log("hello world from js init script");
+  ///
+  ///     window.__MY_CUSTOM_PROPERTY__ = { foo: 'bar' };
+  ///   }
+  /// "#;
+  ///
+  /// fn main() {
+  ///   tauri::Builder::default()
+  ///     .setup(|app| {
+  ///       let webview = tauri::WebviewWindowBuilder::new(app, "label", tauri::WebviewUrl::App("index.html".into()))
+  ///         .initialization_script_for_all_frames(INIT_SCRIPT)
+  ///         .build()?;
+  ///       Ok(())
+  ///     });
+  /// }
+  /// ```
+  #[must_use]
+  pub fn initialization_script_for_all_frames(mut self, script: impl Into<String>) -> Self {
+    self.webview_builder = self
+      .webview_builder
+      .initialization_script_for_all_frames(script);
     self
   }
 
@@ -879,13 +1085,13 @@ impl<'a, R: Runtime, M: Manager<R>> WebviewWindowBuilder<'a, R, M> {
     self
   }
 
-  /// Whether page zooming by hotkeys is enabled
+  /// Whether page zooming by hotkeys and mousewheel should be enabled or not.
   ///
   /// ## Platform-specific:
   ///
   /// - **Windows**: Controls WebView2's [`IsZoomControlEnabled`](https://learn.microsoft.com/en-us/microsoft-edge/webview2/reference/winrt/microsoft_web_webview2_core/corewebview2settings?view=webview2-winrt-1.0.2420.47#iszoomcontrolenabled) setting.
-  /// - **MacOS / Linux**: Injects a polyfill that zooms in and out with `ctrl/command` + `-/=`,
-  ///   20% in each step, ranging from 20% to 1000%. Requires `webview:allow-set-webview-zoom` permission
+  /// - **MacOS / Linux**: Injects a polyfill that zooms in and out with `Ctrl/Cmd + [- = +]` hotkeys or mousewheel events,
+  ///   20% in each step, ranging from 20% to 1000%. Requires `core:webview:allow-set-webview-zoom` permission
   ///
   /// - **Android / iOS**: Unsupported.
   #[must_use]
@@ -903,6 +1109,31 @@ impl<'a, R: Runtime, M: Manager<R>> WebviewWindowBuilder<'a, R, M> {
   #[must_use]
   pub fn browser_extensions_enabled(mut self, enabled: bool) -> Self {
     self.webview_builder = self.webview_builder.browser_extensions_enabled(enabled);
+    self
+  }
+
+  /// Set the path from which to load extensions from. Extensions stored in this path should be unpacked Chrome extensions on Windows, and compiled `.so` extensions on Linux.
+  ///
+  /// ## Platform-specific:
+  ///
+  /// - **Windows**: Browser extensions must first be enabled. See [`browser_extensions_enabled`](Self::browser_extensions_enabled)
+  /// - **MacOS / iOS / Android** - Unsupported.
+  #[must_use]
+  pub fn extensions_path(mut self, path: impl AsRef<Path>) -> Self {
+    self.webview_builder = self.webview_builder.extensions_path(path);
+    self
+  }
+
+  /// Initialize the WebView with a custom data store identifier.
+  /// Can be used as a replacement for data_directory not being available in WKWebView.
+  ///
+  /// - **macOS / iOS**: Available on macOS >= 14 and iOS >= 17
+  /// - **Windows / Linux / Android**: Unsupported.
+  #[must_use]
+  pub fn data_store_identifier(mut self, data_store_identifier: [u8; 16]) -> Self {
+    self.webview_builder = self
+      .webview_builder
+      .data_store_identifier(data_store_identifier);
     self
   }
 
@@ -952,6 +1183,178 @@ impl<'a, R: Runtime, M: Manager<R>> WebviewWindowBuilder<'a, R, M> {
     self.webview_builder = self.webview_builder.background_color(color);
     self
   }
+
+  /// Change the default background throttling behaviour.
+  ///
+  /// By default, browsers use a suspend policy that will throttle timers and even unload
+  /// the whole tab (view) to free resources after roughly 5 minutes when a view became
+  /// minimized or hidden. This will pause all tasks until the documents visibility state
+  /// changes back from hidden to visible by bringing the view back to the foreground.
+  ///
+  /// ## Platform-specific
+  ///
+  /// - **Linux / Windows / Android**: Unsupported. Workarounds like a pending WebLock transaction might suffice.
+  /// - **iOS**: Supported since version 17.0+.
+  /// - **macOS**: Supported since version 14.0+.
+  ///
+  /// see https://github.com/tauri-apps/tauri/issues/5250#issuecomment-2569380578
+  #[must_use]
+  pub fn background_throttling(mut self, policy: BackgroundThrottlingPolicy) -> Self {
+    self.webview_builder = self.webview_builder.background_throttling(policy);
+    self
+  }
+
+  /// Whether JavaScript should be disabled.
+  #[must_use]
+  pub fn disable_javascript(mut self) -> Self {
+    self.webview_builder = self.webview_builder.disable_javascript();
+    self
+  }
+
+  /// Allows overriding the the keyboard accessory view on iOS.
+  /// Returning `None` effectively removes the view.
+  ///
+  /// The closure parameter is the webview instance.
+  ///
+  /// The accessory view is the view that appears above the keyboard when a text input element is focused.
+  /// It usually displays a view with "Done", "Next" buttons.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// fn main() {
+  ///   tauri::Builder::default()
+  ///     .setup(|app| {
+  ///       let mut builder = tauri::WebviewWindowBuilder::new(app, "label", tauri::WebviewUrl::App("index.html".into()));
+  ///       #[cfg(target_os = "ios")]
+  ///       {
+  ///         window_builder = window_builder.with_input_accessory_view_builder(|_webview| unsafe {
+  ///           let mtm = objc2_foundation::MainThreadMarker::new_unchecked();
+  ///           let button = objc2_ui_kit::UIButton::buttonWithType(objc2_ui_kit::UIButtonType(1), mtm);
+  ///           button.setTitle_forState(
+  ///             Some(&objc2_foundation::NSString::from_str("Tauri")),
+  ///             objc2_ui_kit::UIControlState(0),
+  ///           );
+  ///           Some(button.downcast().unwrap())
+  ///         });
+  ///       }
+  ///       let webview = builder.build()?;
+  ///       Ok(())
+  ///     });
+  /// }
+  /// ```
+  ///
+  /// # Stability
+  ///
+  /// This relies on [`objc2_ui_kit`] which does not provide a stable API yet, so it can receive breaking changes in minor releases.
+  #[cfg(target_os = "ios")]
+  pub fn with_input_accessory_view_builder<
+    F: Fn(&objc2_ui_kit::UIView) -> Option<objc2::rc::Retained<objc2_ui_kit::UIView>>
+      + Send
+      + Sync
+      + 'static,
+  >(
+    mut self,
+    builder: F,
+  ) -> Self {
+    self.webview_builder = self
+      .webview_builder
+      .with_input_accessory_view_builder(builder);
+    self
+  }
+
+  /// Set the environment for the webview.
+  /// Useful if you need to share the same environment, for instance when using the [`Self::on_new_window`].
+  #[cfg(all(feature = "wry", windows))]
+  pub fn with_environment(
+    mut self,
+    environment: webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Environment,
+  ) -> Self {
+    self.webview_builder = self.webview_builder.with_environment(environment);
+    self
+  }
+
+  /// Creates a new webview sharing the same web process with the provided webview.
+  /// Useful if you need to link a webview to another, for instance when using the [`Self::on_new_window`].
+  #[cfg(all(
+    feature = "wry",
+    any(
+      target_os = "linux",
+      target_os = "dragonfly",
+      target_os = "freebsd",
+      target_os = "netbsd",
+      target_os = "openbsd",
+    )
+  ))]
+  pub fn with_related_view(mut self, related_view: webkit2gtk::WebView) -> Self {
+    self.webview_builder = self.webview_builder.with_related_view(related_view);
+    self
+  }
+
+  /// Set the webview configuration.
+  /// Useful if you need to share the same webview configuration, for instance when using the [`Self::on_new_window`].
+  #[cfg(target_os = "macos")]
+  pub fn with_webview_configuration(
+    mut self,
+    webview_configuration: objc2::rc::Retained<objc2_web_kit::WKWebViewConfiguration>,
+  ) -> Self {
+    self.webview_builder = self
+      .webview_builder
+      .with_webview_configuration(webview_configuration);
+    self
+  }
+
+  /// Set the window features.
+  /// Useful if you need to share the same window features, for instance when using the [`Self::on_new_window`].
+  #[cfg(any(
+    target_os = "macos",
+    windows,
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+  ))]
+  pub fn window_features(mut self, features: NewWindowFeatures) -> Self {
+    if let Some(position) = features.position() {
+      self.window_builder = self.window_builder.position(position.x, position.y);
+    }
+
+    if let Some(size) = features.size() {
+      self.window_builder = self.window_builder.inner_size(size.width, size.height);
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+      self.webview_builder = self
+        .webview_builder
+        .with_webview_configuration(features.opener().target_configuration.clone());
+    }
+
+    #[cfg(all(feature = "wry", windows))]
+    {
+      self.webview_builder = self
+        .webview_builder
+        .with_environment(features.opener().environment.clone());
+    }
+
+    #[cfg(all(
+      feature = "wry",
+      any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd",
+      )
+    ))]
+    {
+      self.webview_builder = self
+        .webview_builder
+        .with_related_view(features.opener().webview.clone());
+    }
+    self
+  }
 }
 
 /// A type that wraps a [`Window`] together with a [`Webview`].
@@ -979,7 +1382,7 @@ impl<R: Runtime> Clone for WebviewWindow<R> {
 
 impl<R: Runtime> Eq for WebviewWindow<R> {}
 impl<R: Runtime> PartialEq for WebviewWindow<R> {
-  /// Only use the [`Window`]'s label to compare equality.
+  /// Only use the [`Webview`]'s label to compare equality.
   fn eq(&self, other: &Self) -> bool {
     self.webview.eq(&other.webview)
   }
@@ -1009,10 +1412,7 @@ impl<'de, R: Runtime> CommandArg<'de, R> for WebviewWindow<R> {
     let webview = command.message.webview();
     let window = webview.window();
     if window.is_webview_window() {
-      return Ok(Self {
-        window: window.clone(),
-        webview,
-      });
+      return Ok(Self { window, webview });
     }
 
     Err(InvokeError::from("current webview is not a WebviewWindow"))
@@ -1045,6 +1445,11 @@ impl<R: Runtime> WebviewWindow<R> {
   /// Registers a window event listener.
   pub fn on_window_event<F: Fn(&WindowEvent) + Send + 'static>(&self, f: F) {
     self.window.on_window_event(f);
+  }
+
+  /// Registers a webview event listener.
+  pub fn on_webview_event<F: Fn(&WebviewEvent) + Send + 'static>(&self, f: F) {
+    self.webview.on_webview_event(f);
   }
 
   /// Resolves the given command scope for this webview on the currently loaded URL.
@@ -1263,6 +1668,15 @@ impl<R: Runtime> WebviewWindow<R> {
   /// Whether the window is enabled or disabled.
   pub fn is_enabled(&self) -> crate::Result<bool> {
     self.webview.window().is_enabled()
+  }
+
+  /// Determines if this window should always be on top of other windows.
+  ///
+  /// ## Platform-specific
+  ///
+  /// - **iOS / Android:** Unsupported.
+  pub fn is_always_on_top(&self) -> crate::Result<bool> {
+    self.webview.window().is_always_on_top()
   }
 
   /// Gets the window's native maximize button state
@@ -1629,6 +2043,16 @@ impl<R: Runtime> WebviewWindow<R> {
     self.window.set_focus()
   }
 
+  /// Sets whether the window can be focused.
+  ///
+  /// ## Platform-specific
+  ///
+  /// - **macOS**: If the window is already focused, it is not possible to unfocus it after calling `set_focusable(false)`.
+  ///   In this case, you might consider calling [`Window::set_focus`] but it will move the window to the back i.e. at the bottom in terms of z-order.
+  pub fn set_focusable(&self, focusable: bool) -> crate::Result<()> {
+    self.window.set_focusable(focusable)
+  }
+
   /// Sets this window' icon.
   pub fn set_icon(&self, icon: Image<'_>) -> crate::Result<()> {
     self.window.set_icon(icon)
@@ -1704,6 +2128,32 @@ impl<R: Runtime> WebviewWindow<R> {
     self.window.start_dragging()
   }
 
+  /// Sets the overlay icon on the taskbar **Windows only**. Using `None` will remove the icon
+  ///
+  /// The overlay icon can be unique for each window.
+  #[cfg(target_os = "windows")]
+  #[cfg_attr(docsrs, doc(cfg(target_os = "windows")))]
+  pub fn set_overlay_icon(&self, icon: Option<Image<'_>>) -> crate::Result<()> {
+    self.window.set_overlay_icon(icon)
+  }
+
+  /// Sets the taskbar badge count. Using `0` or `None` will remove the badge
+  ///
+  /// ## Platform-specific
+  /// - **Windows:** Unsupported, use [`WebviewWindow::set_overlay_icon`] instead.
+  /// - **iOS:** iOS expects i32, the value will be clamped to i32::MIN, i32::MAX.
+  /// - **Android:** Unsupported.
+  pub fn set_badge_count(&self, count: Option<i64>) -> crate::Result<()> {
+    self.window.set_badge_count(count)
+  }
+
+  /// Sets the taskbar badge label **macOS only**. Using `None` will remove the badge
+  #[cfg(target_os = "macos")]
+  #[cfg_attr(docsrs, doc(cfg(target_os = "macos")))]
+  pub fn set_badge_label(&self, label: Option<String>) -> crate::Result<()> {
+    self.window.set_badge_label(label)
+  }
+
   /// Sets the taskbar progress state.
   ///
   /// ## Platform-specific
@@ -1723,8 +2173,13 @@ impl<R: Runtime> WebviewWindow<R> {
     self.window.set_title_bar_style(style)
   }
 
-  /// Set the window theme.
-  pub fn set_theme(&self, theme: Option<Theme>) -> crate::Result<()> {
+  /// Sets the theme for this window.
+  ///
+  /// ## Platform-specific
+  ///
+  /// - **Linux / macOS**: Theme is app-wide and not specific to this window.
+  /// - **iOS / Android:** Unsupported.
+  pub fn set_theme(&self, theme: Option<tauri_utils::Theme>) -> crate::Result<()> {
     self.window.set_theme(theme)
   }
 }
@@ -1745,6 +2200,9 @@ impl<R: Runtime> WebviewWindow<R> {
   /// Executes a closure, providing it with the webview handle that is specific to the current platform.
   ///
   /// The closure is executed on the main thread.
+  ///
+  /// Note that `webview2-com`, `webkit2gtk`, `objc2_web_kit` and similar crates may be updated in minor releases of Tauri.
+  /// Therefore it's recommended to pin Tauri to at least a minor version when you're using `with_webview`.
   ///
   /// # Examples
   ///
@@ -1810,8 +2268,13 @@ impl<R: Runtime> WebviewWindow<R> {
   }
 
   /// Navigates the webview to the defined url.
-  pub fn navigate(&mut self, url: Url) -> crate::Result<()> {
+  pub fn navigate(&self, url: Url) -> crate::Result<()> {
     self.webview.navigate(url)
+  }
+
+  /// Reloads the current page.
+  pub fn reload(&self) -> crate::Result<()> {
+    self.webview.reload()
   }
 
   /// Handles this window receiving an [`crate::webview::InvokeRequest`].
@@ -1824,7 +2287,7 @@ impl<R: Runtime> WebviewWindow<R> {
   }
 
   /// Evaluates JavaScript on this window.
-  pub fn eval(&self, js: &str) -> crate::Result<()> {
+  pub fn eval(&self, js: impl Into<String>) -> crate::Result<()> {
     self.webview.eval(js)
   }
 
@@ -1932,6 +2395,66 @@ impl<R: Runtime> WebviewWindow<R> {
   pub fn clear_all_browsing_data(&self) -> crate::Result<()> {
     self.webview.clear_all_browsing_data()
   }
+
+  /// Returns all cookies in the runtime's cookie store including HTTP-only and secure cookies.
+  ///
+  /// Note that cookies will only be returned for URLs with an http or https scheme.
+  /// Cookies set through javascript for local files
+  /// (such as those served from the tauri://) protocol are not currently supported.
+  ///
+  /// # Stability
+  ///
+  /// See [Self::cookies].
+  ///
+  /// # Known issues
+  ///
+  /// See [Self::cookies].
+  pub fn cookies_for_url(&self, url: Url) -> crate::Result<Vec<Cookie<'static>>> {
+    self.webview.cookies_for_url(url)
+  }
+
+  /// Returns all cookies in the runtime's cookie store for all URLs including HTTP-only and secure cookies.
+  ///
+  /// Note that cookies will only be returned for URLs with an http or https scheme.
+  /// Cookies set through javascript for local files
+  /// (such as those served from the tauri://) protocol are not currently supported.
+  ///
+  /// # Stability
+  ///
+  /// The return value of this function leverages [`tauri_runtime::Cookie`] which re-exports the cookie crate.
+  /// This dependency might receive updates in minor Tauri releases.
+  ///
+  /// # Known issues
+  ///
+  /// On Windows, this function deadlocks when used in a synchronous command or event handlers, see [the Webview2 issue].
+  /// You should use `async` commands and separate threads when reading cookies.
+  ///
+  /// ## Platform-specific
+  ///
+  /// - **Android**: Unsupported, always returns an empty [`Vec`].
+  ///
+  /// [the Webview2 issue]: https://github.com/tauri-apps/wry/issues/583
+  pub fn cookies(&self) -> crate::Result<Vec<Cookie<'static>>> {
+    self.webview.cookies()
+  }
+
+  /// Set a cookie for the webview.
+  ///
+  /// # Stability
+  ///
+  /// See [Self::cookies].
+  pub fn set_cookie(&self, cookie: Cookie<'_>) -> crate::Result<()> {
+    self.webview.set_cookie(cookie)
+  }
+
+  /// Delete a cookie for the webview.
+  ///
+  /// # Stability
+  ///
+  /// See [Self::cookies].
+  pub fn delete_cookie(&self, cookie: Cookie<'_>) -> crate::Result<()> {
+    self.webview.delete_cookie(cookie)
+  }
 }
 
 impl<R: Runtime> Listener<R> for WebviewWindow<R> {
@@ -1956,8 +2479,9 @@ impl<R: Runtime> Listener<R> for WebviewWindow<R> {
   where
     F: Fn(Event) + Send + 'static,
   {
+    let event = EventName::new(event.into()).unwrap();
     self.manager().listen(
-      event.into(),
+      event,
       EventTarget::WebviewWindow {
         label: self.label().to_string(),
       },
@@ -1972,8 +2496,9 @@ impl<R: Runtime> Listener<R> for WebviewWindow<R> {
   where
     F: FnOnce(Event) + Send + 'static,
   {
+    let event = EventName::new(event.into()).unwrap();
     self.manager().once(
-      event.into(),
+      event,
       EventTarget::WebviewWindow {
         label: self.label().to_string(),
       },
@@ -2010,79 +2535,7 @@ impl<R: Runtime> Listener<R> for WebviewWindow<R> {
   }
 }
 
-impl<R: Runtime> Emitter<R> for WebviewWindow<R> {
-  /// Emits an event to all [targets](EventTarget).
-  ///
-  /// # Examples
-  /// ```
-  /// use tauri::Emitter;
-  ///
-  /// #[tauri::command]
-  /// fn synchronize(window: tauri::WebviewWindow) {
-  ///   // emits the synchronized event to all webviews
-  ///   window.emit("synchronized", ());
-  /// }
-  ///   ```
-  fn emit<S: Serialize + Clone>(&self, event: &str, payload: S) -> crate::Result<()> {
-    self.manager().emit(event, payload)
-  }
-
-  /// Emits an event to all [targets](EventTarget) matching the given target.
-  ///
-  /// # Examples
-  /// ```
-  /// use tauri::{Emitter, EventTarget};
-  ///
-  /// #[tauri::command]
-  /// fn download(window: tauri::WebviewWindow) {
-  ///   for i in 1..100 {
-  ///     std::thread::sleep(std::time::Duration::from_millis(150));
-  ///     // emit a download progress event to all listeners
-  ///     window.emit_to(EventTarget::any(), "download-progress", i);
-  ///     // emit an event to listeners that used App::listen or AppHandle::listen
-  ///     window.emit_to(EventTarget::app(), "download-progress", i);
-  ///     // emit an event to any webview/window/webviewWindow matching the given label
-  ///     window.emit_to("updater", "download-progress", i); // similar to using EventTarget::labeled
-  ///     window.emit_to(EventTarget::labeled("updater"), "download-progress", i);
-  ///     // emit an event to listeners that used WebviewWindow::listen
-  ///     window.emit_to(EventTarget::webview_window("updater"), "download-progress", i);
-  ///   }
-  /// }
-  /// ```
-  fn emit_to<I, S>(&self, target: I, event: &str, payload: S) -> crate::Result<()>
-  where
-    I: Into<EventTarget>,
-    S: Serialize + Clone,
-  {
-    self.manager().emit_to(target, event, payload)
-  }
-
-  /// Emits an event to all [targets](EventTarget) based on the given filter.
-  ///
-  /// # Examples
-  /// ```
-  /// use tauri::{Emitter, EventTarget};
-  ///
-  /// #[tauri::command]
-  /// fn download(window: tauri::WebviewWindow) {
-  ///   for i in 1..100 {
-  ///     std::thread::sleep(std::time::Duration::from_millis(150));
-  ///     // emit a download progress event to the updater window
-  ///     window.emit_filter("download-progress", i, |t| match t {
-  ///       EventTarget::WebviewWindow { label } => label == "main",
-  ///       _ => false,
-  ///     });
-  ///   }
-  /// }
-  ///   ```
-  fn emit_filter<S, F>(&self, event: &str, payload: S, filter: F) -> crate::Result<()>
-  where
-    S: Serialize + Clone,
-    F: Fn(&EventTarget) -> bool,
-  {
-    self.manager().emit_filter(event, payload, filter)
-  }
-}
+impl<R: Runtime> Emitter<R> for WebviewWindow<R> {}
 
 impl<R: Runtime> Manager<R> for WebviewWindow<R> {
   fn resources_table(&self) -> MutexGuard<'_, ResourceTable> {

@@ -4,7 +4,7 @@
 // SPDX-License-Identifier: MIT
 
 use super::category::AppCategory;
-use crate::bundle::{common, platform::target_triple};
+use crate::{bundle::platform::target_triple, utils::fs_utils};
 use anyhow::Context;
 pub use tauri_utils::config::WebviewInstallMode;
 use tauri_utils::{
@@ -12,6 +12,7 @@ use tauri_utils::{
     BundleType, DeepLinkProtocol, FileAssociation, NSISInstallerMode, NsisCompression,
     RpmCompression,
   },
+  platform::Target as TargetPlatform,
   resources::{external_binaries, ResourcePaths},
 };
 
@@ -220,6 +221,10 @@ pub struct DebianSettings {
 pub struct AppImageSettings {
   /// The files to include in the Appimage Binary.
   pub files: HashMap<PathBuf, PathBuf>,
+  /// Whether to include gstreamer plugins for audio/media support.
+  pub bundle_media_framework: bool,
+  /// Whether to include the `xdg-open` binary.
+  pub bundle_xdg_open: bool,
 }
 
 /// The RPM bundle settings.
@@ -235,7 +240,7 @@ pub struct RpmSettings {
   /// in order for the package to be installed.
   pub conflicts: Option<Vec<String>>,
   /// The list of RPM dependencies your application supersedes - if this package is installed,
-  /// packages listed as “obsoletes” will be automatically removed (if they are present).
+  /// packages listed as "obsoletes" will be automatically removed (if they are present).
   pub obsoletes: Option<Vec<String>>,
   /// The RPM release tag.
   pub release: String,
@@ -302,6 +307,13 @@ pub struct DmgSettings {
   pub application_folder_position: Position,
 }
 
+/// The iOS bundle settings.
+#[derive(Clone, Debug, Default)]
+pub struct IosSettings {
+  /// The version of the build that identifies an iteration of the bundle.
+  pub bundle_version: Option<String>,
+}
+
 /// The macOS bundle settings.
 #[derive(Clone, Debug, Default)]
 pub struct MacOsSettings {
@@ -319,6 +331,12 @@ pub struct MacOsSettings {
   /// List of custom files to add to the application bundle.
   /// Maps the path in the Contents directory in the app to the path of the file to include (relative to the current working directory).
   pub files: HashMap<PathBuf, PathBuf>,
+  /// The version of the build that identifies an iteration of the bundle.
+  pub bundle_version: Option<String>,
+  /// The name of the build that identifies a string of the bundle.
+  ///
+  /// If not set, defaults to the package's product name.
+  pub bundle_name: Option<String>,
   /// A version string indicating the minimum MacOS version that the bundled app supports (e.g. `"10.11"`).
   /// If you are using this config field, you may also want have your `build.rs` script emit `cargo:rustc-env=MACOSX_DEPLOYMENT_TARGET=10.11`.
   pub minimum_system_version: Option<String>,
@@ -328,6 +346,15 @@ pub struct MacOsSettings {
   pub exception_domain: Option<String>,
   /// Code signing identity.
   pub signing_identity: Option<String>,
+  /// Whether to wait for notarization to finish and `staple` the ticket onto the app.
+  ///
+  /// Gatekeeper will look for stapled tickets to tell whether your app was notarized without
+  /// reaching out to Apple's servers which is helpful in offline environments.
+  ///
+  /// Enabling this option will also result in `tauri build` not waiting for notarization to finish
+  /// which is helpful for the very first time your app is notarized as this can take multiple hours.
+  /// On subsequent runs, it's recommended to disable this setting again.
+  pub skip_stapling: bool,
   /// Preserve the hardened runtime version flag, see <https://developer.apple.com/documentation/security/hardened_runtime>
   ///
   /// Settings this to `false` is useful when using an ad-hoc signature, making it less strict.
@@ -404,7 +431,7 @@ pub struct WixSettings {
   pub banner_path: Option<PathBuf>,
   /// Path to a bitmap file to use on the installation user interface dialogs.
   /// It is used on the welcome and completion dialogs.
-
+  ///
   /// The required dimensions are 493px × 312px.
   pub dialog_image_path: Option<PathBuf>,
   /// Enables FIPS compliant algorithms.
@@ -639,6 +666,8 @@ pub struct BundleSettings {
   pub rpm: RpmSettings,
   /// DMG-specific settings.
   pub dmg: DmgSettings,
+  /// iOS-specific settings.
+  pub ios: IosSettings,
   /// MacOS-specific settings.
   pub macos: MacOsSettings,
   /// Updater configuration.
@@ -719,6 +748,8 @@ pub enum Arch {
   Armhf,
   /// For the AArch32 / ARM32 instruction sets with soft-float (32 bits).
   Armel,
+  /// For the RISC-V instruction sets (64 bits).
+  Riscv64,
   /// For universal macOS applications.
   Universal,
 }
@@ -743,6 +774,8 @@ pub struct Settings {
   bundle_settings: BundleSettings,
   /// the binaries to bundle.
   binaries: Vec<BundleBinary>,
+  /// The target platform.
+  target_platform: TargetPlatform,
   /// The target triple.
   target: String,
 }
@@ -838,6 +871,7 @@ impl SettingsBuilder {
     } else {
       target_triple()?
     };
+    let target_platform = TargetPlatform::from_triple(&target);
 
     Ok(Settings {
       log_level: self.log_level.unwrap_or(log::Level::Error),
@@ -855,9 +889,10 @@ impl SettingsBuilder {
           .bundle_settings
           .external_bin
           .as_ref()
-          .map(|bins| external_binaries(bins, &target)),
+          .map(|bins| external_binaries(bins, &target, &target_platform)),
         ..self.bundle_settings
       },
+      target_platform,
       target,
     })
   }
@@ -884,6 +919,11 @@ impl Settings {
     &self.target
   }
 
+  /// Returns the [`TargetPlatform`].
+  pub fn target_platform(&self) -> &TargetPlatform {
+    &self.target_platform
+  }
+
   /// Returns the architecture for the binary being bundled (e.g. "arm", "x86" or "x86_64").
   pub fn binary_arch(&self) -> Arch {
     if self.target.starts_with("x86_64") {
@@ -896,6 +936,8 @@ impl Settings {
       Arch::Armel
     } else if self.target.starts_with("aarch64") {
       Arch::AArch64
+    } else if self.target.starts_with("riscv64") {
+      Arch::Riscv64
     } else if self.target.starts_with("universal") {
       Arch::Universal
     } else {
@@ -936,19 +978,23 @@ impl Settings {
 
   /// Returns the path to the specified binary.
   pub fn binary_path(&self, binary: &BundleBinary) -> PathBuf {
-    let target_os = self
-      .target()
-      .split('-')
-      .nth(2)
-      .unwrap_or(std::env::consts::OS);
+    let target_os = self.target_platform();
 
-    let path = self.project_out_directory.join(binary.name());
+    let mut path = self.project_out_directory.join(binary.name());
 
-    if target_os == "windows" {
-      path.with_extension("exe")
-    } else {
-      path
-    }
+    if matches!(target_os, TargetPlatform::Windows) {
+      // Append the `.exe` extension without overriding the existing extensions
+      let extension = if let Some(extension) = path.extension() {
+        let mut extension = extension.to_os_string();
+        extension.push(".exe");
+        extension
+      } else {
+        "exe".into()
+      };
+      path.set_extension(extension);
+    };
+
+    path
   }
 
   /// Returns the list of binaries to bundle.
@@ -966,18 +1012,13 @@ impl Settings {
   ///
   /// Fails if the host/target's native package type is not supported.
   pub fn package_types(&self) -> crate::Result<Vec<PackageType>> {
-    let target_os = self
-      .target
-      .split('-')
-      .nth(2)
-      .unwrap_or(std::env::consts::OS)
-      .replace("darwin", "macos");
+    let target_os = self.target_platform();
 
-    let platform_types = match target_os.as_str() {
-      "macos" => vec![PackageType::MacOsBundle, PackageType::Dmg],
-      "ios" => vec![PackageType::IosBundle],
-      "linux" => vec![PackageType::Deb, PackageType::Rpm, PackageType::AppImage],
-      "windows" => vec![PackageType::WindowsMsi, PackageType::Nsis],
+    let platform_types = match target_os {
+      TargetPlatform::MacOS => vec![PackageType::MacOsBundle, PackageType::Dmg],
+      TargetPlatform::Ios => vec![PackageType::IosBundle],
+      TargetPlatform::Linux => vec![PackageType::Deb, PackageType::Rpm, PackageType::AppImage],
+      TargetPlatform::Windows => vec![PackageType::WindowsMsi, PackageType::Nsis],
       os => {
         return Err(crate::Error::GenericError(format!(
           "Native {os} bundles not yet supported."
@@ -1064,7 +1105,7 @@ impl Settings {
           .to_string_lossy()
           .replace(&format!("-{}", self.target), ""),
       );
-      common::copy_file(&src, &dest)?;
+      fs_utils::copy_file(&src, &dest)?;
       paths.push(dest);
     }
     Ok(paths)
@@ -1075,7 +1116,7 @@ impl Settings {
     for resource in self.resource_files().iter() {
       let resource = resource?;
       let dest = path.join(resource.target());
-      common::copy_file(resource.path(), dest)?;
+      fs_utils::copy_file(resource.path(), &dest)?;
     }
     Ok(())
   }
@@ -1180,6 +1221,11 @@ impl Settings {
   /// Returns the DMG settings.
   pub fn dmg(&self) -> &DmgSettings {
     &self.bundle_settings.dmg
+  }
+
+  /// Returns the iOS settings.
+  pub fn ios(&self) -> &IosSettings {
+    &self.bundle_settings.ios
   }
 
   /// Returns the MacOS settings.

@@ -23,11 +23,13 @@
 // files into the `Contents` directory of the bundle.
 
 use super::{
-  super::common::{self, CommandExt},
   icon::create_icns_file,
-  sign::{notarize, notarize_auth, sign, NotarizeAuthError, SignTarget},
+  sign::{notarize, notarize_auth, notarize_without_stapling, sign, NotarizeAuthError, SignTarget},
 };
-use crate::Settings;
+use crate::{
+  utils::{fs_utils, CommandExt},
+  Settings,
+};
 
 use anyhow::Context;
 
@@ -63,15 +65,11 @@ pub fn bundle_project(settings: &Settings) -> crate::Result<Vec<PathBuf>> {
 
   if app_bundle_path.exists() {
     fs::remove_dir_all(&app_bundle_path)
-      .with_context(|| format!("Failed to remove old {}", app_product_name))?;
+      .with_context(|| format!("Failed to remove old {app_product_name}"))?;
   }
   let bundle_directory = app_bundle_path.join("Contents");
-  fs::create_dir_all(&bundle_directory).with_context(|| {
-    format!(
-      "Failed to create bundle directory at {:?}",
-      bundle_directory
-    )
-  })?;
+  fs::create_dir_all(&bundle_directory)
+    .with_context(|| format!("Failed to create bundle directory at {bundle_directory:?}"))?;
 
   let resources_dir = bundle_directory.join("Resources");
   let bin_dir = bundle_directory.join("MacOS");
@@ -123,7 +121,11 @@ pub fn bundle_project(settings: &Settings) -> crate::Result<Vec<PathBuf>> {
     // notarization is required for distribution
     match notarize_auth() {
       Ok(auth) => {
-        notarize(&keychain, app_bundle_path.clone(), &auth)?;
+        if settings.macos().skip_stapling {
+          notarize_without_stapling(&keychain, app_bundle_path.clone(), &auth)?;
+        } else {
+          notarize(&keychain, app_bundle_path.clone(), &auth)?;
+        }
       }
       Err(e) => {
         if matches!(e, NotarizeAuthError::MissingTeamId) {
@@ -157,8 +159,8 @@ fn copy_binaries_to_bundle(
   for bin in settings.binaries() {
     let bin_path = settings.binary_path(bin);
     let dest_path = dest_dir.join(bin.name());
-    common::copy_file(&bin_path, &dest_path)
-      .with_context(|| format!("Failed to copy binary from {:?}", bin_path))?;
+    fs_utils::copy_file(&bin_path, &dest_path)
+      .with_context(|| format!("Failed to copy binary from {bin_path:?}"))?;
     paths.push(dest_path);
   }
   Ok(paths)
@@ -173,11 +175,11 @@ fn copy_custom_files_to_bundle(bundle_directory: &Path, settings: &Settings) -> 
       contents_path
     };
     if path.is_file() {
-      common::copy_file(path, bundle_directory.join(contents_path))
-        .with_context(|| format!("Failed to copy file {:?} to {:?}", path, contents_path))?;
+      fs_utils::copy_file(path, &bundle_directory.join(contents_path))
+        .with_context(|| format!("Failed to copy file {path:?} to {contents_path:?}"))?;
     } else {
-      common::copy_dir(path, &bundle_directory.join(contents_path))
-        .with_context(|| format!("Failed to copy directory {:?} to {:?}", path, contents_path))?;
+      fs_utils::copy_dir(path, &bundle_directory.join(contents_path))
+        .with_context(|| format!("Failed to copy directory {path:?} to {contents_path:?}"))?;
     }
   }
   Ok(())
@@ -189,12 +191,6 @@ fn create_info_plist(
   bundle_icon_file: Option<PathBuf>,
   settings: &Settings,
 ) -> crate::Result<()> {
-  let format = time::format_description::parse("[year][month][day].[hour][minute][second]")
-    .map_err(time::error::Error::from)?;
-  let build_number = time::OffsetDateTime::now_utc()
-    .format(&format)
-    .map_err(time::error::Error::from)?;
-
   let mut plist = plist::Dictionary::new();
   plist.insert("CFBundleDevelopmentRegion".into(), "English".into());
   plist.insert("CFBundleDisplayName".into(), settings.product_name().into());
@@ -218,13 +214,29 @@ fn create_info_plist(
     settings.bundle_identifier().into(),
   );
   plist.insert("CFBundleInfoDictionaryVersion".into(), "6.0".into());
-  plist.insert("CFBundleName".into(), settings.product_name().into());
+  if let Some(bundle_name) = settings
+    .macos()
+    .bundle_name
+    .as_deref()
+    .unwrap_or_else(|| settings.product_name())
+    .into()
+  {
+    plist.insert("CFBundleName".into(), bundle_name.into());
+  }
   plist.insert("CFBundlePackageType".into(), "APPL".into());
   plist.insert(
     "CFBundleShortVersionString".into(),
     settings.version_string().into(),
   );
-  plist.insert("CFBundleVersion".into(), build_number.into());
+  plist.insert(
+    "CFBundleVersion".into(),
+    settings
+      .macos()
+      .bundle_version
+      .as_deref()
+      .unwrap_or_else(|| settings.version_string())
+      .into(),
+  );
   plist.insert("CSResourcesFileMapped".into(), true.into());
   if let Some(category) = settings.app_category() {
     plist.insert(
@@ -267,6 +279,7 @@ fn create_info_plist(
               "CFBundleTypeRole".into(),
               association.role.to_string().into(),
             );
+            dict.insert("LSHandlerRank".into(), association.rank.to_string().into());
             plist::Value::Dictionary(dict)
           })
           .collect(),
@@ -346,10 +359,10 @@ fn create_info_plist(
 
 // Copies the framework under `{src_dir}/{framework}.framework` to `{dest_dir}/{framework}.framework`.
 fn copy_framework_from(dest_dir: &Path, framework: &str, src_dir: &Path) -> crate::Result<bool> {
-  let src_name = format!("{}.framework", framework);
+  let src_name = format!("{framework}.framework");
   let src_path = src_dir.join(&src_name);
   if src_path.exists() {
-    common::copy_dir(&src_path, &dest_dir.join(&src_name))?;
+    fs_utils::copy_dir(&src_path, &dest_dir.join(&src_name))?;
     Ok(true)
   } else {
     Ok(false)
@@ -374,7 +387,7 @@ fn copy_frameworks_to_bundle(
   }
   let dest_dir = bundle_directory.join("Frameworks");
   fs::create_dir_all(bundle_directory)
-    .with_context(|| format!("Failed to create Frameworks directory at {:?}", dest_dir))?;
+    .with_context(|| format!("Failed to create Frameworks directory at {dest_dir:?}"))?;
   for framework in frameworks.iter() {
     if framework.ends_with(".framework") {
       let src_path = PathBuf::from(framework);
@@ -382,20 +395,19 @@ fn copy_frameworks_to_bundle(
         .file_name()
         .expect("Couldn't get framework filename");
       let dest_path = dest_dir.join(src_name);
-      common::copy_dir(&src_path, &dest_path)?;
+      fs_utils::copy_dir(&src_path, &dest_path)?;
       add_framework_sign_path(&src_path, &dest_path, &mut paths);
       continue;
     } else if framework.ends_with(".dylib") {
       let src_path = PathBuf::from(framework);
       if !src_path.exists() {
         return Err(crate::Error::GenericError(format!(
-          "Library not found: {}",
-          framework
+          "Library not found: {framework}"
         )));
       }
       let src_name = src_path.file_name().expect("Couldn't get library filename");
       let dest_path = dest_dir.join(src_name);
-      common::copy_file(&src_path, &dest_path)?;
+      fs_utils::copy_file(&src_path, &dest_path)?;
       paths.push(SignTarget {
         path: dest_path,
         is_an_executable: false,
@@ -403,8 +415,7 @@ fn copy_frameworks_to_bundle(
       continue;
     } else if framework.contains('/') {
       return Err(crate::Error::GenericError(format!(
-        "Framework path should have .framework extension: {}",
-        framework
+        "Framework path should have .framework extension: {framework}"
       )));
     }
     if let Some(home_dir) = dirs::home_dir() {
@@ -422,8 +433,7 @@ fn copy_frameworks_to_bundle(
       continue;
     }
     return Err(crate::Error::GenericError(format!(
-      "Could not locate framework: {}",
-      framework
+      "Could not locate framework: {framework}"
     )));
   }
   Ok(paths)

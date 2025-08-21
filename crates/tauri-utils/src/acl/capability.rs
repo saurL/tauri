@@ -76,8 +76,9 @@ impl<'de> Deserialize<'de> for PermissionEntry {
 
 /// A grouping and boundary mechanism developers can use to isolate access to the IPC layer.
 ///
-/// It controls application windows fine grained access to the Tauri core, application, or plugin commands.
-/// If a window is not matching any capability then it has no access to the IPC layer at all.
+/// It controls application windows' and webviews' fine grained access
+/// to the Tauri core, application, or plugin commands.
+/// If a webview or its window is not matching any capability then it has no access to the IPC layer at all.
 ///
 /// This can be done to create groups of windows, based on their required system access, which can reduce
 /// impact of frontend vulnerabilities in less privileged windows.
@@ -89,7 +90,7 @@ impl<'de> Deserialize<'de> for PermissionEntry {
 /// ```json
 /// {
 ///   "identifier": "main-user-files-write",
-///   "description": "This capability allows the `main` window on macOS and Windows access to `filesystem` write related commands and `dialog` commands to enable programatic access to files selected by the user.",
+///   "description": "This capability allows the `main` window on macOS and Windows access to `filesystem` write related commands and `dialog` commands to enable programmatic access to files selected by the user.",
 ///   "windows": [
 ///     "main"
 ///   ],
@@ -121,7 +122,7 @@ pub struct Capability {
   /// ## Example
   ///
   /// This capability allows the `main` window access to `filesystem` write related
-  /// commands and `dialog` commands to enable programatic access to files selected by the user.
+  /// commands and `dialog` commands to enable programmatic access to files selected by the user.
   #[serde(default)]
   pub description: String,
   /// Configure remote URLs that can use the capability permissions.
@@ -148,7 +149,12 @@ pub struct Capability {
   pub local: bool,
   /// List of windows that are affected by this capability. Can be a glob pattern.
   ///
-  /// On multiwebview windows, prefer [`Self::webviews`] for a fine grained access control.
+  /// If a window label matches any of the patterns in this list,
+  /// the capability will be enabled on all the webviews of that window,
+  /// regardless of the value of [`Self::webviews`].
+  ///
+  /// On multiwebview windows, prefer specifying [`Self::webviews`] and omitting [`Self::windows`]
+  /// for a fine grained access control.
   ///
   /// ## Example
   ///
@@ -157,8 +163,9 @@ pub struct Capability {
   pub windows: Vec<String>,
   /// List of webviews that are affected by this capability. Can be a glob pattern.
   ///
-  /// This is only required when using on multiwebview contexts, by default
-  /// all child webviews of a window that matches [`Self::windows`] are linked.
+  /// The capability will be enabled on all the webviews
+  /// whose label matches any of the patterns in this list,
+  /// regardless of whether the webview's window label matches a pattern in [`Self::windows`].
   ///
   /// ## Example
   ///
@@ -267,6 +274,8 @@ impl CapabilityFile {
     let file: Self = match ext.as_str() {
       "toml" => toml::from_str(&capability_file)?,
       "json" => serde_json::from_str(&capability_file)?,
+      #[cfg(feature = "config-json5")]
+      "json5" => json5::from_str(&capability_file)?,
       _ => return Err(super::Error::UnknownCapabilityFormat(ext)),
     };
     Ok(file)
@@ -441,7 +450,7 @@ mod tests {
       ))
       .unwrap(),
       CapabilityFile::NamedList {
-        capabilities: vec![capability.clone()]
+        capabilities: vec![capability]
       }
     );
   }

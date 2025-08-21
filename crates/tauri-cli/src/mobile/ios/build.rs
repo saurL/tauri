@@ -14,7 +14,7 @@ use crate::{
     config::{get as get_tauri_config, ConfigHandle},
     flock,
   },
-  interface::{AppInterface, AppSettings, Interface, Options as InterfaceOptions},
+  interface::{AppInterface, Interface, Options as InterfaceOptions},
   mobile::{write_options, CliOptions},
   ConfigValue, Result,
 };
@@ -30,7 +30,7 @@ use cargo_mobile2::{
   opts::{NoiseLevel, Profile},
   target::{call_for_targets_with_fallback, TargetInvalid, TargetTrait},
 };
-use rand::distributions::{Alphanumeric, DistString};
+use rand::distr::{Alphanumeric, SampleString};
 
 use std::{
   env::{set_current_dir, var, var_os},
@@ -60,9 +60,15 @@ pub struct Options {
   /// List of cargo features to activate
   #[clap(short, long, action = ArgAction::Append, num_args(0..))]
   pub features: Option<Vec<String>>,
-  /// JSON string or path to JSON file to merge with tauri.conf.json
+  /// JSON strings or paths to JSON, JSON5 or TOML files to merge with the default configuration file
+  ///
+  /// Configurations are merged in the order they are provided, which means a particular value overwrites previous values when a config key-value pair conflicts.
+  ///
+  /// Note that a platform-specific file is looked up and merged with the default file by default
+  /// (tauri.macos.conf.json, tauri.linux.conf.json, tauri.windows.conf.json, tauri.android.conf.json and tauri.ios.conf.json)
+  /// but you can use this for more specific use cases such as different build flavors.
   #[clap(short, long)]
-  pub config: Option<ConfigValue>,
+  pub config: Vec<ConfigValue>,
   /// Build number to append to the app version.
   #[clap(long)]
   pub build_number: Option<u32>,
@@ -77,6 +83,16 @@ pub struct Options {
   /// Use this to create a package ready for the App Store (app-store-connect option) or TestFlight (release-testing option).
   #[clap(long, value_enum)]
   pub export_method: Option<ExportMethod>,
+  /// Command line arguments passed to the runner.
+  /// Use `--` to explicitly mark the start of the arguments.
+  /// e.g. `tauri ios build -- [runnerArgs]`.
+  #[clap(last(true))]
+  pub args: Vec<String>,
+  /// Do not error out if a version mismatch is detected on a Tauri package.
+  ///
+  /// Only use this when you are sure the mismatch is incorrectly detected as version mismatched Tauri packages can lead to unknown behavior.
+  #[clap(long)]
+  pub ignore_version_mismatches: bool,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -119,8 +135,10 @@ impl From<Options> for BuildOptions {
       bundles: None,
       no_bundle: false,
       config: options.config,
-      args: Vec::new(),
+      args: options.args,
       ci: options.ci,
+      skip_stapling: false,
+      ignore_version_mismatches: options.ignore_version_mismatches,
     }
   }
 }
@@ -145,7 +163,7 @@ pub fn command(options: Options, noise_level: NoiseLevel) -> Result<()> {
 
   let tauri_config = get_tauri_config(
     tauri_utils::platform::Target::Ios,
-    options.config.as_ref().map(|c| &c.0),
+    &options.config.iter().map(|c| &c.0).collect::<Vec<_>>(),
   )?;
   let (interface, mut config) = {
     let tauri_config_guard = tauri_config.lock().unwrap();
@@ -160,7 +178,7 @@ pub fn command(options: Options, noise_level: NoiseLevel) -> Result<()> {
       tauri_config_,
       build_options.features.as_ref(),
       &Default::default(),
-    );
+    )?;
     (interface, config)
   };
 
@@ -176,9 +194,10 @@ pub fn command(options: Options, noise_level: NoiseLevel) -> Result<()> {
   inject_resources(&config, tauri_config.lock().unwrap().as_ref().unwrap())?;
 
   let mut plist = plist::Dictionary::new();
-  let version = interface.app_settings().get_package_settings().version;
-  plist.insert("CFBundleShortVersionString".into(), version.clone().into());
-  plist.insert("CFBundleVersion".into(), version.into());
+  plist.insert(
+    "CFBundleShortVersionString".into(),
+    config.bundle_version_short().into(),
+  );
 
   let info_plist_path = config
     .project_dir()
@@ -275,6 +294,7 @@ fn run_build(
   let out_dir = app_settings.out_dir(&InterfaceOptions {
     debug: build_options.debug,
     target: build_options.target.clone(),
+    args: build_options.args.clone(),
     ..Default::default()
   })?;
   let _lock = flock::open_rw(out_dir.join("lock").with_extension("ios"), "iOS")?;
@@ -288,10 +308,11 @@ fn run_build(
     config: build_options.config.clone(),
     target_device: None,
   };
-  let handle = write_options(
-    &tauri_config.lock().unwrap().as_ref().unwrap().identifier,
-    cli_options,
-  )?;
+  let handle = write_options(tauri_config.lock().unwrap().as_ref().unwrap(), cli_options)?;
+
+  if options.open {
+    return Ok(handle);
+  }
 
   let mut out_files = Vec::new();
 
@@ -300,9 +321,10 @@ fn run_build(
     &detect_target_ok,
     env,
     |target: &Target| -> Result<()> {
-      let mut app_version = config.bundle_version().clone();
+      let mut app_version = config.bundle_version().to_string();
       if let Some(build_number) = options.build_number {
-        app_version.push_extra(build_number);
+        app_version.push('.');
+        app_version.push_str(&build_number.to_string());
       }
 
       let credentials = auth_credentials_from_env()?;
@@ -315,7 +337,7 @@ fn run_build(
           .skip_codesign();
       }
 
-      target.build(config, env, noise_level, profile, build_config)?;
+      target.build(None, config, env, noise_level, profile, build_config)?;
 
       let mut archive_config = ArchiveConfig::new();
       if skip_signing {
@@ -352,7 +374,7 @@ fn run_build(
         // we must force sign the app binary with a dummy certificate just to preserve the entitlements
         // target.export() will sign it with an actual certificate for us
         if skip_signing {
-          let password = Alphanumeric.sample_string(&mut rand::thread_rng(), 16);
+          let password = Alphanumeric.sample_string(&mut rand::rng(), 16);
           let certificate = tauri_macos_sign::certificate::generate_self_signed(
             tauri_macos_sign::certificate::SelfSignedCertificateRequest {
               algorithm: "rsa".to_string(),

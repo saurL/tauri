@@ -21,7 +21,10 @@ use super::freedesktop;
 pub fn bundle_project(settings: &Settings) -> crate::Result<Vec<PathBuf>> {
   let product_name = settings.product_name();
   let version = settings.version_string();
-  let release = settings.rpm().release.as_str();
+  let release = match settings.rpm().release.as_str() {
+    "" => "1", // Considered the default. If left empty, you get file with "-.".
+    v => v,
+  };
   let epoch = settings.rpm().epoch;
   let arch = match settings.binary_arch() {
     Arch::X86_64 => "x86_64",
@@ -29,10 +32,10 @@ pub fn bundle_project(settings: &Settings) -> crate::Result<Vec<PathBuf>> {
     Arch::AArch64 => "aarch64",
     Arch::Armhf => "armhfp",
     Arch::Armel => "armel",
+    Arch::Riscv64 => "riscv64",
     target => {
       return Err(crate::Error::ArchError(format!(
-        "Unsupported architecture: {:?}",
-        target
+        "Unsupported architecture: {target:?}"
       )));
     }
   };
@@ -67,6 +70,7 @@ pub fn bundle_project(settings: &Settings) -> crate::Result<Vec<PathBuf>> {
       _ => rpm::CompressionWithLevel::None,
     })
     // This matches .deb compression. On a 240MB source binary the bundle will be 100KB larger than rpm's default while reducing build times by ~25%.
+    // TODO: Default to Zstd in v3 to match rpm-rs new default in 0.16
     .unwrap_or(rpm::CompressionWithLevel::Gzip(6));
 
   let mut builder = rpm::PackageBuilder::new(&name, version, &license, arch, summary)
@@ -185,10 +189,10 @@ pub fn bundle_project(settings: &Settings) -> crate::Result<Vec<PathBuf>> {
       FileOptions::new(resource_dir.to_string_lossy()).mode(FileMode::Dir { permissions: 0o755 }),
     )?;
     // Then add the resources files in that directory
-    for src in settings.resource_files() {
-      let src = src?;
-      let dest = resource_dir.join(tauri_utils::resources::resource_relpath(&src));
-      builder = builder.with_file(&src, FileOptions::new(dest.to_string_lossy()))?;
+    for resource in settings.resource_files().iter() {
+      let resource = resource?;
+      let dest = resource_dir.join(resource.target());
+      builder = builder.with_file(resource.path(), FileOptions::new(dest.to_string_lossy()))?;
     }
   }
 
@@ -233,6 +237,5 @@ pub fn bundle_project(settings: &Settings) -> crate::Result<Vec<PathBuf>> {
 
   let mut f = fs::File::create(&package_path)?;
   pkg.write(&mut f)?;
-
   Ok(vec![package_path])
 }

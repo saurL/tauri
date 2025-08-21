@@ -8,6 +8,7 @@ on:
   pull_request:
     paths:
       - '.github/workflows/check-generated-files.yml'
+      - 'pnpm-lock.yaml'
       - 'packages/api/src/**'
       - 'crates/tauri/scripts/bundle.global.js'
       - 'crates/tauri-utils/src/config.rs'
@@ -31,6 +32,7 @@ jobs:
         with:
           filters: |
             api:
+              - 'pnpm-lock.yaml'
               - 'packages/api/src/**'
               - 'crates/tauri/scripts/bundle.global.js'
             schema:
@@ -44,7 +46,7 @@ jobs:
     if: needs.changes.outputs.api == 'true'
     steps:
       - uses: actions/checkout@v4
-      - run: corepack enable
+      - run: npm i -g --force corepack
       - uses: actions/setup-node@v4
         with:
           node-version: 'lts/*'

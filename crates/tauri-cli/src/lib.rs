@@ -2,8 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
-//! [![](https://github.com/tauri-apps/tauri/raw/dev/.github/splash.png)](https://tauri.app)
-//!
 //! This Rust executable provides the full interface to all of the required activities for which the CLI is required. It will run on macOS, Windows, and Linux.
 
 #![doc(
@@ -65,10 +63,22 @@ impl FromStr for ConfigValue {
     } else {
       let path = PathBuf::from(config);
       if path.exists() {
-        Ok(Self(serde_json::from_str(
-          &read_to_string(&path)
-            .with_context(|| format!("invalid configuration at file {config}"))?,
-        )?))
+        let raw = &read_to_string(&path)
+          .with_context(|| format!("invalid configuration at file {config}"))?;
+        match path.extension() {
+          Some(ext) if ext == "toml" => Ok(Self(::toml::from_str(raw)?)),
+          Some(ext) if ext == "json5" => Ok(Self(::json5::from_str(raw)?)),
+          // treat all other extensions as json
+          _ => Ok(Self(
+            // from tauri-utils/src/config/parse.rs:
+            // we also want to support **valid** json5 in the .json extension
+            // if the json5 is not valid the serde_json error for regular json will be returned.
+            match ::json5::from_str(raw) {
+              Ok(json5) => json5,
+              Err(_) => serde_json::from_str(raw)?,
+            },
+          )),
+        }
       } else {
         anyhow::bail!("provided configuration path does not exist")
       }
@@ -229,6 +239,16 @@ where
   let init_res = builder
     .format_indent(Some(12))
     .filter(None, verbosity_level(verbosity_number).to_level_filter())
+    // golbin spams an insane amount of really technical logs on the debug level so we're reducing one level
+    .filter(
+      Some("goblin"),
+      verbosity_level(verbosity_number.saturating_sub(1)).to_level_filter(),
+    )
+    // handlebars is not that spammy but its debug logs are typically far from being helpful
+    .filter(
+      Some("handlebars"),
+      verbosity_level(verbosity_number.saturating_sub(1)).to_level_filter(),
+    )
     .format(|f, record| {
       let mut is_command_output = false;
       if let Some(action) = record.key_values().get("action".into()) {
@@ -237,13 +257,13 @@ where
         if !is_command_output {
           let style = Style::new().fg_color(Some(AnsiColor::Green.into())).bold();
 
-          write!(f, "    {style}{}{style:#} ", action)?;
+          write!(f, "{style}{action:>12}{style:#} ")?;
         }
       } else {
         let style = f.default_level_style(record.level()).bold();
         write!(
           f,
-          "    {style}{}{style:#} ",
+          "{style}{:>12}{style:#} ",
           prettyprint_level(record.level())
         )?;
       }
@@ -321,7 +341,7 @@ impl CommandExt for Command {
     let program = self.get_program().to_string_lossy().into_owned();
     log::debug!(action = "Running"; "Command `{} {}`", program, self.get_args().map(|arg| arg.to_string_lossy()).fold(String::new(), |acc, arg| format!("{acc} {arg}")));
 
-    self.status().map_err(Into::into)
+    self.status()
   }
 
   fn output_ok(&mut self) -> crate::Result<Output> {

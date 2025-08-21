@@ -104,7 +104,8 @@ impl ValidByte {
 
       (_, IDENTIFIER_SEPARATOR) => Some(ValidByte::Separator),
       (ValidByte::Separator, next) => ValidByte::alpha_numeric(next),
-      (ValidByte::Byte(b'-'), next) => ValidByte::alpha_numeric(next),
+      (ValidByte::Byte(b'-'), next) => ValidByte::alpha_numeric_hyphen(next),
+      (ValidByte::Byte(b'_'), next) => ValidByte::alpha_numeric_hyphen(next),
       (ValidByte::Byte(_), next) => ValidByte::alpha_numeric_hyphen(next),
     }
   }
@@ -253,9 +254,9 @@ mod tests {
     assert!(ident("prefix:-base").is_err());
     assert!(ident("prefix:base-").is_err());
 
-    assert!(ident("pre--fix:base--sep").is_err());
-    assert!(ident("prefix:base--sep").is_err());
-    assert!(ident("pre--fix:base").is_err());
+    assert!(ident("pre--fix:base--sep").is_ok());
+    assert!(ident("prefix:base--sep").is_ok());
+    assert!(ident("pre--fix:base").is_ok());
 
     assert!(ident("prefix::base").is_err());
     assert!(ident(":base").is_err());

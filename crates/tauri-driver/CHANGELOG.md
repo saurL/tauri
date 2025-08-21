@@ -1,5 +1,27 @@
 # Changelog
 
+## \[2.0.4]
+
+### Enhancements
+
+- [`0cf2d9933`](https://www.github.com/tauri-apps/tauri/commit/0cf2d9933f20375349f9f307b4dd7049690030d9) ([#13238](https://www.github.com/tauri-apps/tauri/pull/13238)) Automatically append the `.exe` extension on the application path in `tauri:options`.
+
+### Bug Fixes
+
+- [`577c7ffc4`](https://www.github.com/tauri-apps/tauri/commit/577c7ffc45ef005403cdf698e595614038c7d1e1) ([#10108](https://www.github.com/tauri-apps/tauri/pull/10108)) Ensure the webdriver process is closed when the tauri-driver process finishes.
+
+## \[2.0.3]
+
+### Bug Fixes
+
+- [`fb294af8e`](https://www.github.com/tauri-apps/tauri/commit/fb294af8e3717d547029f3bbf9323318e0d9861a) ([#12383](https://www.github.com/tauri-apps/tauri/pull/12383) by [@bicarlsen](https://www.github.com/tauri-apps/tauri/../../bicarlsen)) Parse ms:edgeOptions separately to prevent `invalid argument` errors.
+
+## \[2.0.2]
+
+### Enhancements
+
+- [`70f96e322`](https://www.github.com/tauri-apps/tauri/commit/70f96e3222871a1931a18d6093d7efcbc59e7fee) ([#12240](https://www.github.com/tauri-apps/tauri/pull/12240) by [@getong](https://www.github.com/tauri-apps/tauri/../../getong)) Updated `hyper` to version 1. This won't affect the user facing API.
+
 ## \[2.0.1]
 
 ### What's Changed

@@ -51,6 +51,11 @@ export interface Monitor {
   size: PhysicalSize
   /** the Top-left corner position of the monitor relative to the larger full screen area. */
   position: PhysicalPosition
+  /** The monitor's work area. */
+  workArea: {
+    position: PhysicalPosition
+    size: PhysicalSize
+  }
   /** The scale factor that can be used to map physical pixels to logical pixels. */
   scaleFactor: number
 }
@@ -441,7 +446,7 @@ class Window {
    * @param event Event name. Must include only alphanumeric characters, `-`, `/`, `:` and `_`.
    * @param payload Event payload.
    */
-  async emit(event: string, payload?: unknown): Promise<void> {
+  async emit<T>(event: string, payload?: T): Promise<void> {
     if (localTauriEvents.includes(event)) {
       // eslint-disable-next-line
       for (const handler of this.listeners[event] || []) {
@@ -453,7 +458,7 @@ class Window {
       }
       return
     }
-    return emit(event, payload)
+    return emit<T>(event, payload)
   }
 
   /**
@@ -468,10 +473,10 @@ class Window {
    * @param event Event name. Must include only alphanumeric characters, `-`, `/`, `:` and `_`.
    * @param payload Event payload.
    */
-  async emitTo(
+  async emitTo<T>(
     target: string | EventTarget,
     event: string,
-    payload?: unknown
+    payload?: T
   ): Promise<void> {
     if (localTauriEvents.includes(event)) {
       // eslint-disable-next-line security/detect-object-injection
@@ -484,7 +489,7 @@ class Window {
       }
       return
     }
-    return emitTo(target, event, payload)
+    return emitTo<T>(target, event, payload)
   }
 
   /** @ignore */
@@ -795,6 +800,22 @@ class Window {
    */
   async theme(): Promise<Theme | null> {
     return invoke('plugin:window|theme', {
+      label: this.label
+    })
+  }
+
+  /**
+   * Whether the window is configured to be always on top of other windows or not.
+   * @example
+   * ```typescript
+   * import { getCurrentWindow } from '@tauri-apps/api/window';
+   * const alwaysOnTop = await getCurrentWindow().isAlwaysOnTop();
+   * ```
+   *
+   * @returns Whether the window is visible or not.
+   */
+  async isAlwaysOnTop(): Promise<boolean> {
+    return invoke('plugin:window|is_always_on_top', {
       label: this.label
     })
   }
@@ -1385,6 +1406,22 @@ class Window {
   }
 
   /**
+   * On macOS, Toggles a fullscreen mode that doesn’t require a new macOS space. Returns a boolean indicating whether the transition was successful (this won’t work if the window was already in the native fullscreen).
+   * This is how fullscreen used to work on macOS in versions before Lion. And allows the user to have a fullscreen window without using another space or taking control over the entire monitor.
+   *
+   * On other platforms, this is the same as {@link Window.setFullscreen}.
+   *
+   * @param fullscreen Whether the window should go to simple fullscreen or not.
+   * @returns A promise indicating the success or failure of the operation.
+   */
+  async setSimpleFullscreen(fullscreen: boolean): Promise<void> {
+    return invoke('plugin:window|set_simple_fullscreen', {
+      label: this.label,
+      value: fullscreen
+    })
+  }
+
+  /**
    * Bring the window to front and focus.
    * @example
    * ```typescript
@@ -1397,6 +1434,30 @@ class Window {
   async setFocus(): Promise<void> {
     return invoke('plugin:window|set_focus', {
       label: this.label
+    })
+  }
+
+  /**
+   * Sets whether the window can be focused.
+   *
+   * #### Platform-specific
+   *
+   * - **macOS**: If the window is already focused, it is not possible to unfocus it after calling `set_focusable(false)`.
+   *   In this case, you might consider calling {@link Window.setFocus} but it will move the window to the back i.e. at the bottom in terms of z-order.
+   *
+   * @example
+   * ```typescript
+   * import { getCurrentWindow } from '@tauri-apps/api/window';
+   * await getCurrentWindow().setFocusable(true);
+   * ```
+   *
+   * @param focusable Whether the window can be focused.
+   * @returns A promise indicating the success or failure of the operation.
+   */
+  async setFocusable(focusable: boolean): Promise<void> {
+    return invoke('plugin:window|set_focusable', {
+      label: this.label,
+      value: focusable
     })
   }
 
@@ -1602,6 +1663,79 @@ class Window {
     return invoke('plugin:window|start_resize_dragging', {
       label: this.label,
       value: direction
+    })
+  }
+
+  /**
+   * Sets the badge count. It is app wide and not specific to this window.
+   *
+   * #### Platform-specific
+   *
+   * - **Windows**: Unsupported. Use @{linkcode Window.setOverlayIcon} instead.
+   *
+   * @example
+   * ```typescript
+   * import { getCurrentWindow } from '@tauri-apps/api/window';
+   * await getCurrentWindow().setBadgeCount(5);
+   * ```
+   *
+   * @param count The badge count. Use `undefined` to remove the badge.
+   * @return A promise indicating the success or failure of the operation.
+   */
+  async setBadgeCount(count?: number): Promise<void> {
+    return invoke('plugin:window|set_badge_count', {
+      label: this.label,
+      value: count
+    })
+  }
+
+  /**
+   * Sets the badge cont **macOS only**.
+   *
+   * @example
+   * ```typescript
+   * import { getCurrentWindow } from '@tauri-apps/api/window';
+   * await getCurrentWindow().setBadgeLabel("Hello");
+   * ```
+   *
+   * @param label The badge label. Use `undefined` to remove the badge.
+   * @return A promise indicating the success or failure of the operation.
+   */
+  async setBadgeLabel(label?: string): Promise<void> {
+    return invoke('plugin:window|set_badge_label', {
+      label: this.label,
+      value: label
+    })
+  }
+
+  /**
+   * Sets the overlay icon. **Windows only**
+   * The overlay icon can be set for every window.
+   *
+   *
+   * Note that you may need the `image-ico` or `image-png` Cargo features to use this API.
+   * To enable it, change your Cargo.toml file:
+   *
+   * ```toml
+   * [dependencies]
+   * tauri = { version = "...", features = ["...", "image-png"] }
+   * ```
+   *
+   * @example
+   * ```typescript
+   * import { getCurrentWindow } from '@tauri-apps/api/window';
+   * await getCurrentWindow().setOverlayIcon("/tauri/awesome.png");
+   * ```
+   *
+   * @param icon Icon bytes or path to the icon file. Use `undefined` to remove the overlay icon.
+   * @return A promise indicating the success or failure of the operation.
+   */
+  async setOverlayIcon(
+    icon?: string | Image | Uint8Array | ArrayBuffer | number[]
+  ): Promise<void> {
+    return invoke('plugin:window|set_overlay_icon', {
+      label: this.label,
+      value: icon ? transformImage(icon) : undefined
     })
   }
 
@@ -1949,6 +2083,17 @@ type Color =
   | string
 
 /**
+ * Background throttling policy
+ *
+ * @since 2.0.0
+ */
+enum BackgroundThrottlingPolicy {
+  Disabled = 'disabled',
+  Throttle = 'throttle',
+  Suspend = 'suspend'
+}
+
+/**
  * Platform-specific window effects
  *
  * @since 2.0.0
@@ -2122,6 +2267,14 @@ interface Effects {
 }
 
 /**
+ * Minimum margin to work area
+ */
+interface PreventOverflowMargin {
+  width: number
+  height: number
+}
+
+/**
  * Configuration for the window to create.
  *
  * @since 1.0.0
@@ -2145,6 +2298,21 @@ interface WindowOptions {
   maxWidth?: number
   /** The maximum height. Only applies if `maxWidth` is also set. */
   maxHeight?: number
+  /**
+   * Prevent the window from overflowing the working area (e.g. monitor size - taskbar size)
+   * on creation, which means the window size will be limited to `monitor size - taskbar size`
+   *
+   * Can either be set to `true` or to a {@link PreventOverflowMargin} object to set an additional margin
+   * that should be considered to determine the working area
+   * (in this case the window size will be limited to `monitor size - taskbar size - margin`)
+   *
+   * **NOTE**: The overflow check is only performed on window creation, resizes can still overflow
+   *
+   * #### Platform-specific
+   *
+   * - **iOS / Android:** Unsupported.
+   */
+  preventOverflow?: boolean | PreventOverflowMargin
   /** Whether the window is resizable or not. */
   resizable?: boolean
   /** Window title. */
@@ -2153,6 +2321,8 @@ interface WindowOptions {
   fullscreen?: boolean
   /** Whether the window will be initially focused or not. */
   focus?: boolean
+  /** Whether the window can be focused or not. */
+  focusable?: boolean
   /**
    * Whether the window is transparent or not.
    * Note that on `macOS` this requires the `macos-private-api` feature flag, enabled under `tauri.conf.json > app > macOSPrivateApi`.
@@ -2197,6 +2367,14 @@ interface WindowOptions {
    * The style of the macOS title bar.
    */
   titleBarStyle?: TitleBarStyle
+  /**
+   * The position of the window controls on macOS.
+   *
+   * Requires `titleBarStyle: 'overlay'` and `decorations: true`.
+   *
+   * @since 2.4.0
+   */
+  trafficLightPosition?: LogicalPosition
   /**
    * If `true`, sets the window title to be hidden on macOS.
    */
@@ -2265,6 +2443,36 @@ interface WindowOptions {
    * @since 2.1.0
    */
   backgroundColor?: Color
+
+  /** Change the default background throttling behaviour.
+   *
+   * ## Platform-specific
+   *
+   * - **Linux / Windows / Android**: Unsupported. Workarounds like a pending WebLock transaction might suffice.
+   * - **iOS**: Supported since version 17.0+.
+   * - **macOS**: Supported since version 14.0+.
+   *
+   * see https://github.com/tauri-apps/tauri/issues/5250#issuecomment-2569380578
+   *
+   * @since 2.3.0
+   */
+  backgroundThrottling?: BackgroundThrottlingPolicy
+  /**
+   * Whether we should disable JavaScript code execution on the webview or not.
+   */
+  javascriptDisabled?: boolean
+  /**
+   * on macOS and iOS there is a link preview on long pressing links, this is enabled by default.
+   * see https://docs.rs/objc2-web-kit/latest/objc2_web_kit/struct.WKWebView.html#method.allowsLinkPreview
+   */
+  allowLinkPreview?: boolean
+  /**
+   * Allows disabling the input accessory view on iOS.
+   *
+   * The accessory view is the view that appears above the keyboard when a text input element is focused.
+   * It usually displays a view with "Done", "Next" buttons.
+   */
+  disableInputAccessoryView?: boolean
 }
 
 function mapMonitor(m: Monitor | null): Monitor | null {
@@ -2274,7 +2482,11 @@ function mapMonitor(m: Monitor | null): Monitor | null {
         name: m.name,
         scaleFactor: m.scaleFactor,
         position: new PhysicalPosition(m.position),
-        size: new PhysicalSize(m.size)
+        size: new PhysicalSize(m.size),
+        workArea: {
+          position: new PhysicalPosition(m.workArea.position),
+          size: new PhysicalSize(m.workArea.size)
+        }
       }
 }
 
@@ -2284,7 +2496,7 @@ function mapMonitor(m: Monitor | null): Monitor | null {
  * @example
  * ```typescript
  * import { currentMonitor } from '@tauri-apps/api/window';
- * const monitor = currentMonitor();
+ * const monitor = await currentMonitor();
  * ```
  *
  * @since 1.0.0
@@ -2301,7 +2513,7 @@ async function currentMonitor(): Promise<Monitor | null> {
  * @example
  * ```typescript
  * import { primaryMonitor } from '@tauri-apps/api/window';
- * const monitor = primaryMonitor();
+ * const monitor = await primaryMonitor();
  * ```
  *
  * @since 1.0.0
@@ -2317,7 +2529,7 @@ async function primaryMonitor(): Promise<Monitor | null> {
  * @example
  * ```typescript
  * import { monitorFromPoint } from '@tauri-apps/api/window';
- * const monitor = monitorFromPoint();
+ * const monitor = await monitorFromPoint(100.0, 200.0);
  * ```
  *
  * @since 1.0.0
@@ -2334,7 +2546,7 @@ async function monitorFromPoint(x: number, y: number): Promise<Monitor | null> {
  * @example
  * ```typescript
  * import { availableMonitors } from '@tauri-apps/api/window';
- * const monitors = availableMonitors();
+ * const monitors = await availableMonitors();
  * ```
  *
  * @since 1.0.0
@@ -2387,5 +2599,6 @@ export type {
   ScaleFactorChanged,
   WindowOptions,
   Color,
+  BackgroundThrottlingPolicy,
   DragDropEvent
 }

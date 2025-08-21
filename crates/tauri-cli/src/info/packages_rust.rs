@@ -3,14 +3,10 @@
 // SPDX-License-Identifier: MIT
 
 use super::{ActionResult, SectionItem};
-use crate::{
-  helpers::cargo_manifest::{
-    crate_latest_version, crate_version, CargoLock, CargoManifest, CrateVersion,
-  },
-  interface::rust::get_workspace_dir,
+use crate::helpers::cargo_manifest::{
+  cargo_manifest_and_lock, crate_latest_version, crate_version, CrateVersion,
 };
 use colored::Colorize;
-use std::fs::read_to_string;
 use std::path::{Path, PathBuf};
 
 pub fn items(frontend_dir: Option<&PathBuf>, tauri_dir: Option<&Path>) -> Vec<SectionItem> {
@@ -18,17 +14,7 @@ pub fn items(frontend_dir: Option<&PathBuf>, tauri_dir: Option<&Path>) -> Vec<Se
 
   if tauri_dir.is_some() || frontend_dir.is_some() {
     if let Some(tauri_dir) = tauri_dir {
-      let manifest: Option<CargoManifest> =
-        if let Ok(manifest_contents) = read_to_string(tauri_dir.join("Cargo.toml")) {
-          toml::from_str(&manifest_contents).ok()
-        } else {
-          None
-        };
-      let lock: Option<CargoLock> = get_workspace_dir()
-        .ok()
-        .and_then(|p| read_to_string(p.join("Cargo.lock")).ok())
-        .and_then(|s| toml::from_str(&s).ok());
-
+      let (manifest, lock) = cargo_manifest_and_lock(tauri_dir);
       for dep in ["tauri", "tauri-build", "wry", "tao"] {
         let crate_version = crate_version(tauri_dir, manifest.as_ref(), lock.as_ref(), dep);
         let item = rust_section_item(dep, crate_version);
@@ -47,18 +33,20 @@ pub fn items(frontend_dir: Option<&PathBuf>, tauri_dir: Option<&Path>) -> Vec<Se
         if o.status.success() {
           let out = String::from_utf8_lossy(o.stdout.as_slice());
           let (package, version) = out.split_once(' ').unwrap_or_default();
-          let latest_ver = crate_latest_version(package).unwrap_or_default();
+          let version = version.strip_suffix('\n').unwrap_or(version);
+          let latest_version = crate_latest_version(package).unwrap_or_default();
           format!(
-            "{} {}: {}{}",
-            package,
-            "🦀",
-            version.split_once('\n').unwrap_or_default().0,
-            if !(version.is_empty() || latest_ver.is_empty()) {
-              let version = semver::Version::parse(version).unwrap();
-              let target_version = semver::Version::parse(latest_ver.as_str()).unwrap();
+            "{package} 🦀: {version}{}",
+            if !(version.is_empty() || latest_version.is_empty()) {
+              let current_version = semver::Version::parse(version).unwrap();
+              let target_version = semver::Version::parse(latest_version.as_str()).unwrap();
 
-              if version < target_version {
-                format!(" ({}, latest: {})", "outdated".yellow(), latest_ver.green())
+              if current_version < target_version {
+                format!(
+                  " ({}, latest: {})",
+                  "outdated".yellow(),
+                  latest_version.green()
+                )
               } else {
                 "".into()
               }
@@ -106,7 +94,6 @@ pub fn rust_section_item(dep: &str, crate_version: CrateVersion) -> SectionItem 
     "🦀",
     crate_version,
     version_suffix
-      .clone()
       .map(|s| format!(",{s}"))
       .unwrap_or_else(|| "".into())
   ))

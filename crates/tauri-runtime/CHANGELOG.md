@@ -1,5 +1,103 @@
 # Changelog
 
+## \[2.8.0]
+
+### New Features
+
+- [`68874c68c`](https://www.github.com/tauri-apps/tauri/commit/68874c68c566638b4c21a3aa67844d1bdaeb6dab) ([#13564](https://www.github.com/tauri-apps/tauri/pull/13564) by [@robertrpf](https://www.github.com/tauri-apps/tauri/../../robertrpf)) Add window focusable attribute and set_focusable API.
+- [`22d6bcacb`](https://www.github.com/tauri-apps/tauri/commit/22d6bcacbb2001eb292ebd8c5d021447700f9512) ([#14008](https://www.github.com/tauri-apps/tauri/pull/14008) by [@WSH032](https://www.github.com/tauri-apps/tauri/../../WSH032)) Implement `App::set_device_event_filter` for `AppHandle` also.
+- [`33d0b3f0c`](https://www.github.com/tauri-apps/tauri/commit/33d0b3f0c133edebb1c716e2f5942d70509ae347) ([#13876](https://www.github.com/tauri-apps/tauri/pull/13876) by [@thlstsul](https://www.github.com/tauri-apps/tauri/../../thlstsul)) Added `WebviewBuilder::on_document_title_changed` and `WebviewWindowBuilder::on_document_title_changed`.
+- [`33d0b3f0c`](https://www.github.com/tauri-apps/tauri/commit/33d0b3f0c133edebb1c716e2f5942d70509ae347) ([#13876](https://www.github.com/tauri-apps/tauri/pull/13876) by [@thlstsul](https://www.github.com/tauri-apps/tauri/../../thlstsul)) Added `WebviewBuilder::on_new_window` and `WebviewWindowBuilder::on_new_window`.
+- [`dfadcb764`](https://www.github.com/tauri-apps/tauri/commit/dfadcb764bdf84089a5487005a7b4f3b7cf09494) ([#13661](https://www.github.com/tauri-apps/tauri/pull/13661) by [@WSH032](https://www.github.com/tauri-apps/tauri/../../WSH032)) Added `WebviewDispatch::set_cookie()` and `WebviewDispatch::delete_cookie()`.
+- [`5110a762e`](https://www.github.com/tauri-apps/tauri/commit/5110a762e9db978a28a15400bf76e3c864da2a86) ([#13830](https://www.github.com/tauri-apps/tauri/pull/13830) by [@Sky-walkerX](https://www.github.com/tauri-apps/tauri/../../Sky-walkerX)) Added `Window::set_simple_fullscreen`.
+
+### Dependencies
+
+- Upgraded to `tauri-utils@2.7.0`
+
+## \[2.7.1]
+
+### Dependencies
+
+- Upgraded to `tauri-utils@2.6.0`
+
+## \[2.7.0]
+
+### Dependencies
+
+- Upgraded to `tauri-utils@2.5.0`
+- [`9c16eefa3`](https://www.github.com/tauri-apps/tauri/commit/9c16eefa319b4697bac1d1019bbb5f93eca63173) ([#13629](https://www.github.com/tauri-apps/tauri/pull/13629)) Update html5ever to 0.29 and kuchikiki to version 0.8.8-speedreader.
+
+## \[2.6.0]
+
+### New Features
+
+- [`dd4f13ce4`](https://www.github.com/tauri-apps/tauri/commit/dd4f13ce4b3cd89cde2fa3f18a063c272f215621) ([#13185](https://www.github.com/tauri-apps/tauri/pull/13185)) MacOS: Add `set_dock_visibility` method to support setting the visibility of the application in the dock.
+- [`8cf662e34`](https://www.github.com/tauri-apps/tauri/commit/8cf662e34bf738a0d16bb7b9aeb35667e2e4984b) ([#13076](https://www.github.com/tauri-apps/tauri/pull/13076)) -   add API to run initialization scripts on all frames
+  \-   `WebviewBuilder::initialization_script_on_all_frames`
+  \-   `WebviewWindowBuilder::initialization_script_on_all_frames`
+  \-   `WebviewAttributes::initialization_script_on_all_frames`
+- [`ea36294cb`](https://www.github.com/tauri-apps/tauri/commit/ea36294cbca98f7725c91d1464fd92e77c89698a) ([#13208](https://www.github.com/tauri-apps/tauri/pull/13208)) Added `WebviewAttributes::input_accessory_view_builder` on iOS.
+- [`c1cd0a2dd`](https://www.github.com/tauri-apps/tauri/commit/c1cd0a2ddb5bc3e99451cbe399b5fc9f0035f571) ([#13090](https://www.github.com/tauri-apps/tauri/pull/13090)) macOS/iOS: add option to disable or enable link previews when building a webview (the webkit api has it enabled by default)
+
+  - `WebViewBuilder.allow_link_preview(allow_link_preview: bool)`
+  - `WebviewWindowBuilder.allow_link_preview(allow_link_preview: bool)`
+- [`b072e2b29`](https://www.github.com/tauri-apps/tauri/commit/b072e2b2967640ae4fa1af466ae878c156551edd) ([#9687](https://www.github.com/tauri-apps/tauri/pull/9687)) Add `preventOverflow` config option to prevent the window from overflowing the monitor size on creation
+
+### Dependencies
+
+- Upgraded to `tauri-utils@2.4.0`
+- [`bb5faa21f`](https://www.github.com/tauri-apps/tauri/commit/bb5faa21f418dd765ce81b495b56e9c519251b6d) ([#13163](https://www.github.com/tauri-apps/tauri/pull/13163)) Update windows to 0.61.
+
+## \[2.5.1]
+
+### Dependencies
+
+- Upgraded to `tauri-utils@2.3.1`
+
+## \[2.5.0]
+
+### New Features
+
+- [`be2e6b85f`](https://www.github.com/tauri-apps/tauri/commit/be2e6b85fed226732b4a98f68cc5d72b4f8f5a13) ([#12944](https://www.github.com/tauri-apps/tauri/pull/12944) by [@Simon-Laux](https://www.github.com/tauri-apps/tauri/../../Simon-Laux)) add `Window.is_always_on_top()` and `WebviewWindow.is_always_on_top()`
+- [`658e5f5d1`](https://www.github.com/tauri-apps/tauri/commit/658e5f5d1dc1bd970ae572a42447448d064a7fee) ([#12668](https://www.github.com/tauri-apps/tauri/pull/12668) by [@thomaseizinger](https://www.github.com/tauri-apps/tauri/../../thomaseizinger)) Add `App::run_return` function. Contrary to `App::run`, this will **not** exit the process but instead return the requested exit-code. This allows the host app to perform further cleanup after Tauri has exited. `App::run_return` is not available on iOS and fallbacks to the regular `App::run` functionality.
+
+  The `App::run_iteration` function is deprecated as part of this because calling it in a loop - as suggested by the name - will cause a busy-loop.
+- [`30f5a1553`](https://www.github.com/tauri-apps/tauri/commit/30f5a1553d3c0ce460c9006764200a9210915a44) ([#12366](https://www.github.com/tauri-apps/tauri/pull/12366) by [@FabianLars](https://www.github.com/tauri-apps/tauri/../../FabianLars)) Added `trafficLightPosition` window configuration to set the traffic light buttons position on macOS.
+- [`30f5a1553`](https://www.github.com/tauri-apps/tauri/commit/30f5a1553d3c0ce460c9006764200a9210915a44) ([#12366](https://www.github.com/tauri-apps/tauri/pull/12366) by [@FabianLars](https://www.github.com/tauri-apps/tauri/../../FabianLars)) Added `traffic_light_position` window builder method to set the traffic light buttons position on macOS.
+- [`cedb24d49`](https://www.github.com/tauri-apps/tauri/commit/cedb24d494b84111daa3206c05196c8b89f1e994) ([#12665](https://www.github.com/tauri-apps/tauri/pull/12665) by [@charrondev](https://www.github.com/tauri-apps/tauri/../../charrondev)) Added `WebviewDispatch::cookies()` and `WebviewDispatch::cookies_for_url()`.
+
+### Dependencies
+
+- Upgraded to `tauri-utils@2.3.0`
+
+## \[2.4.0]
+
+### Enhancements
+
+- [`a2d36b8c3`](https://www.github.com/tauri-apps/tauri/commit/a2d36b8c34a8dcfc6736797ca5cd4665faf75e7e) ([#12181](https://www.github.com/tauri-apps/tauri/pull/12181) by [@bastiankistner](https://www.github.com/tauri-apps/tauri/../../bastiankistner)) Add an option to change the default background throttling policy (currently for WebKit only).
+- [`d6520a21c`](https://www.github.com/tauri-apps/tauri/commit/d6520a21ce02c3e2be2955999946c2cb7bdb07aa) ([#12541](https://www.github.com/tauri-apps/tauri/pull/12541) by [@FabianLars](https://www.github.com/tauri-apps/tauri/../../FabianLars)) Updated `wry` to 0.50, `windows` to 0.60, `webview2-com` to 0.36, and `objc2` to 0.6. This can be a **breaking change** if you use the `with_webview` API!
+
+### Dependencies
+
+- Upgraded to `tauri-utils@2.2.0`
+
+## \[2.3.0]
+
+### New Features
+
+- [`18bd639f6`](https://www.github.com/tauri-apps/tauri/commit/18bd639f6e22c0188aa219739f367b5bf5ab0398) ([#11798](https://www.github.com/tauri-apps/tauri/pull/11798) by [@lars-berger](https://www.github.com/tauri-apps/tauri/../../lars-berger)) Add `WebviewWindowBuilder/WebviewBuilder::data_store_identifier` on macOS.
+- [`dc4d79477`](https://www.github.com/tauri-apps/tauri/commit/dc4d79477665bc3bfefb4048772414cf5d78e3df) ([#11628](https://www.github.com/tauri-apps/tauri/pull/11628) by [@SpikeHD](https://www.github.com/tauri-apps/tauri/../../SpikeHD)) Add `WebviewWindowBuilder/WebviewBuilder::extensions_path` on Linux and Windows.
+- [`020ea0556`](https://www.github.com/tauri-apps/tauri/commit/020ea05561348dcd6d2a7df358f8a5190f661ba2) ([#11661](https://www.github.com/tauri-apps/tauri/pull/11661) by [@ahqsoftwares](https://www.github.com/tauri-apps/tauri/../../ahqsoftwares)) Add badging APIs:
+
+  - `Window/WebviewWindow::set_badge_count` for Linux, macOS and IOS.
+  - `Window/WebviewWindow::set_overlay_icon` for Windows Only.
+  - `Window/WebviewWindow::set_badge_label`for macOS Only.
+
+### Dependencies
+
+- Upgraded to `tauri-utils@2.1.1`
+
 ## \[2.2.0]
 
 ### New Features

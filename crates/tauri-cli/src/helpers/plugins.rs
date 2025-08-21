@@ -38,6 +38,7 @@ pub fn known_plugins() -> HashMap<&'static str, PluginMetadata> {
 
   // uses builder pattern
   for p in [
+    "autostart",
     "global-shortcut",
     "localhost",
     "log",
@@ -69,6 +70,8 @@ pub fn known_plugins() -> HashMap<&'static str, PluginMetadata> {
     "shell",
     "upload",
     "websocket",
+    "opener",
+    "clipboard-manager",
   ] {
     plugins.entry(p).or_default();
   }

@@ -20,7 +20,10 @@ pub use rust::{MobileOptions, Options, Rust as AppInterface};
 pub trait DevProcess {
   fn kill(&self) -> std::io::Result<()>;
   fn try_wait(&self) -> std::io::Result<Option<ExitStatus>>;
+  // TODO:
+  #[allow(unused)]
   fn wait(&self) -> std::io::Result<ExitStatus>;
+  #[allow(unused)]
   fn manually_killed_process(&self) -> bool;
 }
 
@@ -28,6 +31,7 @@ pub trait AppSettings {
   fn get_package_settings(&self) -> tauri_bundler::PackageSettings;
   fn get_bundle_settings(
     &self,
+    options: &Options,
     config: &Config,
     features: &[String],
   ) -> crate::Result<tauri_bundler::BundleSettings>;
@@ -63,7 +67,7 @@ pub trait AppSettings {
 
     let mut settings_builder = SettingsBuilder::new()
       .package_settings(self.get_package_settings())
-      .bundle_settings(self.get_bundle_settings(config, &enabled_features)?)
+      .bundle_settings(self.get_bundle_settings(&options, config, &enabled_features)?)
       .binaries(bins)
       .project_out_directory(out_dir)
       .target(target)

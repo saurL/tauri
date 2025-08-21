@@ -5,7 +5,7 @@
 use std::{ffi::OsStr, path::PathBuf, process::Command};
 
 use anyhow::{Context, Result};
-use rand::distributions::{Alphanumeric, DistString};
+use rand::distr::{Alphanumeric, SampleString};
 
 pub struct ProvisioningProfile {
   path: PathBuf,
@@ -13,7 +13,7 @@ pub struct ProvisioningProfile {
 
 impl ProvisioningProfile {
   pub fn from_base64(base64: &OsStr) -> Result<Self> {
-    let home_dir = dirs_next::home_dir().unwrap();
+    let home_dir = dirs::home_dir().unwrap();
     let provisioning_profiles_folder = home_dir
       .join("Library")
       .join("MobileDevice")
@@ -22,7 +22,7 @@ impl ProvisioningProfile {
 
     let provisioning_profile_path = provisioning_profiles_folder.join(format!(
       "{}.mobileprovision",
-      Alphanumeric.sample_string(&mut rand::thread_rng(), 16)
+      Alphanumeric.sample_string(&mut rand::rng(), 16)
     ));
     super::decode_base64(base64, &provisioning_profile_path)?;
 

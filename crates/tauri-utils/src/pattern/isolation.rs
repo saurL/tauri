@@ -9,7 +9,7 @@ use std::string::FromUtf8Error;
 
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
-use getrandom::{getrandom, Error as CsprngError};
+use getrandom::Error as CsprngError;
 use serialize_to_javascript::{default_template, Template};
 
 /// The style for the isolation iframe.
@@ -56,7 +56,7 @@ impl Debug for AesGcmPair {
 impl AesGcmPair {
   fn new() -> Result<Self, Error> {
     let mut raw = [0u8; 32];
-    getrandom(&mut raw)?;
+    getrandom::fill(&mut raw)?;
     let key = aes_gcm::Key::<Aes256Gcm>::from_slice(&raw);
     Ok(Self {
       raw,
@@ -93,9 +93,7 @@ pub struct Keys {
 impl Keys {
   /// Securely generate required keys for Isolation encryption.
   pub fn new() -> Result<Self, Error> {
-    AesGcmPair::new()
-      .map(|aes_gcm| Self { aes_gcm })
-      .map_err(Into::into)
+    AesGcmPair::new().map(|aes_gcm| Self { aes_gcm })
   }
 
   /// The AES-GCM data (and raw data).

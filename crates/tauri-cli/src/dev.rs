@@ -10,18 +10,20 @@ use crate::{
       get as get_config, reload as reload_config, BeforeDevCommand, ConfigHandle, FrontendDist,
     },
   },
-  interface::{AppInterface, DevProcess, ExitReason, Interface},
+  info::plugins::check_mismatched_packages,
+  interface::{AppInterface, ExitReason, Interface},
   CommandExt, ConfigValue, Result,
 };
 
 use anyhow::{bail, Context};
 use clap::{ArgAction, Parser};
 use shared_child::SharedChild;
-use tauri_utils::platform::Target;
+use tauri_utils::{config::RunnerConfig, platform::Target};
 
 use std::{
   env::set_current_dir,
   net::{IpAddr, Ipv4Addr},
+  path::PathBuf,
   process::{exit, Command, Stdio},
   sync::{
     atomic::{AtomicBool, Ordering},
@@ -49,7 +51,7 @@ pub const TAURI_CLI_BUILTIN_WATCHER_IGNORE_FILE: &[u8] =
 pub struct Options {
   /// Binary to use to run the application
   #[clap(short, long)]
-  pub runner: Option<String>,
+  pub runner: Option<RunnerConfig>,
   /// Target triple to build against
   #[clap(short, long)]
   pub target: Option<String>,
@@ -59,9 +61,15 @@ pub struct Options {
   /// Exit on panic
   #[clap(short, long)]
   pub exit_on_panic: bool,
-  /// JSON string or path to JSON file to merge with tauri.conf.json
+  /// JSON strings or paths to JSON, JSON5 or TOML files to merge with the default configuration file
+  ///
+  /// Configurations are merged in the order they are provided, which means a particular value overwrites previous values when a config key-value pair conflicts.
+  ///
+  /// Note that a platform-specific file is looked up and merged with the default file by default
+  /// (tauri.macos.conf.json, tauri.linux.conf.json, tauri.windows.conf.json, tauri.android.conf.json and tauri.ios.conf.json)
+  /// but you can use this for more specific use cases such as different build flavors.
   #[clap(short, long)]
-  pub config: Option<ConfigValue>,
+  pub config: Vec<ConfigValue>,
   /// Run the code in release mode
   #[clap(long = "release")]
   pub release_mode: bool,
@@ -75,6 +83,9 @@ pub struct Options {
   /// Disable the file watcher.
   #[clap(long)]
   pub no_watch: bool,
+  /// Additional paths to watch for changes.
+  #[clap(long)]
+  pub additional_watch_folders: Vec<PathBuf>,
 
   /// Disable the built-in dev server for static files.
   #[clap(long)]
@@ -104,7 +115,10 @@ fn command_internal(mut options: Options) -> Result<()> {
     .map(Target::from_triple)
     .unwrap_or_else(Target::current);
 
-  let config = get_config(target, options.config.as_ref().map(|c| &c.0))?;
+  let config = get_config(
+    target,
+    &options.config.iter().map(|c| &c.0).collect::<Vec<_>>(),
+  )?;
 
   let mut interface = AppInterface::new(
     config.lock().unwrap().as_ref().unwrap(),
@@ -122,6 +136,13 @@ fn command_internal(mut options: Options) -> Result<()> {
 
 pub fn setup(interface: &AppInterface, options: &mut Options, config: ConfigHandle) -> Result<()> {
   let tauri_path = tauri_dir();
+
+  std::thread::spawn(|| {
+    if let Err(error) = check_mismatched_packages(frontend_dir(), tauri_path) {
+      log::error!("{error}");
+    }
+  });
+
   set_current_dir(tauri_path).with_context(|| "failed to change current working directory")?;
 
   if let Some(before_dev) = config
@@ -215,9 +236,14 @@ pub fn setup(interface: &AppInterface, options: &mut Options, config: ConfigHand
   }
 
   if options.runner.is_none() {
-    options
+    options.runner = config
+      .lock()
+      .unwrap()
+      .as_ref()
+      .unwrap()
+      .build
       .runner
-      .clone_from(&config.lock().unwrap().as_ref().unwrap().build.runner);
+      .clone();
   }
 
   let mut cargo_features = config
@@ -262,26 +288,13 @@ pub fn setup(interface: &AppInterface, options: &mut Options, config: ConfigHand
         let server_url = format!("http://{server_url}");
         dev_url = Some(server_url.parse().unwrap());
 
-        if let Some(c) = &mut options.config {
-          if let Some(build) = c
-            .0
-            .as_object_mut()
-            .and_then(|root| root.get_mut("build"))
-            .and_then(|build| build.as_object_mut())
-          {
-            build.insert("devUrl".into(), server_url.into());
+        options.config.push(crate::ConfigValue(serde_json::json!({
+          "build": {
+            "devUrl": server_url
           }
-        } else {
-          options
-            .config
-            .replace(crate::ConfigValue(serde_json::json!({
-              "build": {
-                "devUrl": server_url
-              }
-            })));
-        }
+        })));
 
-        reload_config(options.config.as_ref().map(|c| &c.0))?;
+        reload_config(&options.config.iter().map(|c| &c.0).collect::<Vec<_>>())?;
       }
     }
   }
@@ -335,31 +348,20 @@ pub fn setup(interface: &AppInterface, options: &mut Options, config: ConfigHand
     }
   }
 
-  Ok(())
-}
-
-pub fn wait_dev_process<
-  C: DevProcess + Send + 'static,
-  F: Fn(Option<i32>, ExitReason) + Send + Sync + 'static,
->(
-  child: C,
-  on_exit: F,
-) {
-  std::thread::spawn(move || {
-    let code = child
-      .wait()
-      .ok()
-      .and_then(|status| status.code())
-      .or(Some(1));
-    on_exit(
-      code,
-      if child.manually_killed_process() {
-        ExitReason::TriggeredKill
-      } else {
-        ExitReason::NormalExit
-      },
+  if options.additional_watch_folders.is_empty() {
+    options.additional_watch_folders.extend(
+      config
+        .lock()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .build
+        .additional_watch_folders
+        .clone(),
     );
-  });
+  }
+
+  Ok(())
 }
 
 pub fn on_app_exit(code: Option<i32>, reason: ExitReason, exit_on_panic: bool, no_watch: bool) {

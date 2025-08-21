@@ -48,7 +48,7 @@ pub fn create_tray<R: Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
     .tooltip("Tauri")
     .icon(app.default_window_icon().unwrap().clone())
     .menu(&menu1)
-    .menu_on_left_click(false)
+    .show_menu_on_left_click(false)
     .on_menu_event(move |app, event| match event.id.as_ref() {
       "quit" => {
         app.exit(0);
@@ -117,6 +117,7 @@ pub fn create_tray<R: Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
       {
         let app = tray.app_handle();
         if let Some(window) = app.get_webview_window("main") {
+          let _ = window.unminimize();
           let _ = window.show();
           let _ = window.set_focus();
         }

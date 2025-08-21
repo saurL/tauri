@@ -4,12 +4,34 @@
 
 use super::{Error, Result};
 use crate::{AppHandle, Manager, Runtime};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// The path resolver is a helper class for general and application-specific path APIs.
 pub struct PathResolver<R: Runtime>(pub(crate) AppHandle<R>);
 
+impl<R: Runtime> Clone for PathResolver<R> {
+  fn clone(&self) -> Self {
+    Self(self.0.clone())
+  }
+}
+
 impl<R: Runtime> PathResolver<R> {
+  /// Returns the final component of the `Path`, if there is one.
+  ///
+  /// If the path is a normal file, this is the file name. If it's the path of a directory, this
+  /// is the directory name.
+  ///
+  /// Returns [`None`] if the path terminates in `..`.
+  ///
+  /// On Android this also supports checking the file name of content URIs, such as the values returned by the dialog plugin.
+  ///
+  /// If you are dealing with plain file system paths or not worried about Android content URIs, prefer [`Path::file_name`].
+  pub fn file_name(&self, path: &str) -> Option<String> {
+    Path::new(path)
+      .file_name()
+      .map(|name| name.to_string_lossy().into_owned())
+  }
+
   /// Returns the path to the user's audio directory.
   ///
   /// ## Platform-specific
@@ -187,6 +209,23 @@ impl<R: Runtime> PathResolver<R> {
   }
 
   /// Returns the path to the resource directory of this app.
+  ///
+  /// ## Platform-specific
+  ///
+  /// Although we provide the exact path where this function resolves to,
+  /// this is not a contract and things might change in the future
+  ///
+  /// - **Windows:** Resolves to the directory that contains the main executable.
+  /// - **Linux:** When running in an AppImage, the `APPDIR` variable will be set to
+  ///   the mounted location of the app, and the resource dir will be `${APPDIR}/usr/lib/${exe_name}`.
+  ///   If not running in an AppImage, the path is `/usr/lib/${exe_name}`.
+  ///   When running the app from `src-tauri/target/(debug|release)/`, the path is `${exe_dir}/../lib/${exe_name}`.
+  /// - **macOS:** Resolves to `${exe_dir}/../Resources` (inside .app).
+  /// - **iOS:** Resolves to `${exe_dir}/assets`.
+  /// - **Android:** Currently the resources are stored in the APK as assets so it's not a normal file system path,
+  ///   we return a special URI prefix `asset://localhost/` here that can be used with the [file system plugin](https://tauri.app/plugin/file-system/),
+  ///   with that, you can read the files through [`FsExt::fs`](https://docs.rs/tauri-plugin-fs/latest/tauri_plugin_fs/trait.FsExt.html#tymethod.fs)
+  ///   like this: `app.fs().read_to_string(app.path().resource_dir().unwrap().join("resource"));`
   pub fn resource_dir(&self) -> Result<PathBuf> {
     crate::utils::platform::resource_dir(self.0.package_info(), &self.0.env())
       .map_err(|_| Error::UnknownPath)

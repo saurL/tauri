@@ -1,5 +1,161 @@
 # Changelog
 
+## \[2.6.0]
+
+### New Features
+
+- [`a9ec12843`](https://www.github.com/tauri-apps/tauri/commit/a9ec12843aa7d0eb774bd3a53e2e63da12cfa77b) ([#13521](https://www.github.com/tauri-apps/tauri/pull/13521) by [@FabianLars](https://www.github.com/tauri-apps/tauri/../../FabianLars)) Added a `--skip-stapling` option to make `tauri build|bundle` *not* wait for notarization to finish on macOS.
+
+### Enhancements
+
+- [`8b465a12b`](https://www.github.com/tauri-apps/tauri/commit/8b465a12ba73e94d7a3995defd9cc362d15eeebe) ([#13913](https://www.github.com/tauri-apps/tauri/pull/13913) by [@FabianLars](https://www.github.com/tauri-apps/tauri/../../FabianLars)) The bundler now pulls the latest AppImage linuxdeploy plugin instead of using the built-in one. This should remove the libfuse requirement.
+- [`4475e93e1`](https://www.github.com/tauri-apps/tauri/commit/4475e93e136e9e2bd5f3c7817fa2040924f630f6) ([#13824](https://www.github.com/tauri-apps/tauri/pull/13824) by [@FabianLars](https://www.github.com/tauri-apps/tauri/../../FabianLars)) The bundler and cli will now read TLS Certificates installed on the system when downloading tools and checking versions.
+
+### Bug Fixes
+
+- [`a8f1569b0`](https://www.github.com/tauri-apps/tauri/commit/a8f1569b04edf7b54a19e19ad37b421b0808f512) ([#13921](https://www.github.com/tauri-apps/tauri/pull/13921) by [@Legend-Master](https://www.github.com/tauri-apps/tauri/../../Legend-Master)) The bundler will no longer try to sign non-binary and already signed binary files on Windows
+- [`bc6b125b2`](https://www.github.com/tauri-apps/tauri/commit/bc6b125b24589ffc412a4f17d899a387a0fc0bb2) ([#13909](https://www.github.com/tauri-apps/tauri/pull/13909) by [@Andrew15-5](https://www.github.com/tauri-apps/tauri/../../Andrew15-5)) The bundler now falls back to `1` for the release in case an empty string was provided instead of using `-.` in the file name.
+
+### Dependencies
+
+- Upgraded to `tauri-utils@2.7.0`
+- Upgraded to `tauri-macos-sign@2.2.0`
+
+## \[2.5.2]
+
+### Bug Fixes
+
+- [`af95fb601`](https://www.github.com/tauri-apps/tauri/commit/af95fb6014ea54a2636bfd299095608f6cd93221) ([#13870](https://www.github.com/tauri-apps/tauri/pull/13870) by [@kittuov](https://www.github.com/tauri-apps/tauri/../../kittuov)) The bundler now signs the main binary after patching it for every package type on windows
+
+## \[2.5.1]
+
+### Bug Fixes
+
+- [`f94af9035`](https://www.github.com/tauri-apps/tauri/commit/f94af90359ec8b01138ae542391caa704ec18ca8) ([#13786](https://www.github.com/tauri-apps/tauri/pull/13786) by [@catalinsh](https://www.github.com/tauri-apps/tauri/../../catalinsh)) Fix NSIS per-machine installer not requesting elevation when run by non-admin users.
+- [`f2dbe7309`](https://www.github.com/tauri-apps/tauri/commit/f2dbe730979d570be3ee3ecac9621204c4ceb788) ([#13772](https://www.github.com/tauri-apps/tauri/pull/13772) by [@catalinsh](https://www.github.com/tauri-apps/tauri/../../catalinsh)) Fix incorrect expected file path for `nsis_tauri_utils.dll` resulting in tauri-cli re-downloading the file on every build.
+- [`7a6fd5b75`](https://www.github.com/tauri-apps/tauri/commit/7a6fd5b75d61071e2771f6277c0376ec206d302a) ([#13863](https://www.github.com/tauri-apps/tauri/pull/13863) by [@FabianLars](https://www.github.com/tauri-apps/tauri/../../FabianLars)) The AppImage bundler now pulls the AppRun binaries from our GitHub mirror, fixing 404 errors.
+
+### Dependencies
+
+- Upgraded to `tauri-utils@2.6.0`
+
+## \[2.5.0]
+
+### New Features
+
+- [`414619c36`](https://www.github.com/tauri-apps/tauri/commit/414619c36e94e21939534dd72c0438b93da75546) ([#13536](https://www.github.com/tauri-apps/tauri/pull/13536) by [@Tunglies](https://www.github.com/tauri-apps/tauri/../../Tunglies)) Added support for the `bundleName` property in the macOS bundler configuration. This allows specifying the `CFBundleName` value for generated macOS bundles.
+- [`7322f0579`](https://www.github.com/tauri-apps/tauri/commit/7322f057923aaec88960ad5556776774b745762f) ([#13502](https://www.github.com/tauri-apps/tauri/pull/13502) by [@amrbashir](https://www.github.com/tauri-apps/tauri/../../amrbashir)) Allow using `CheckIfAppIsRunning` macro inside NSIS hooks, for example `!insertmacro CheckIfAppIsRunning "another-executable.exe" "Another Executable"`.
+
+### Bug Fixes
+
+- [`479cee3d3`](https://www.github.com/tauri-apps/tauri/commit/479cee3d3680f9020005bdfb380d3a9482e286a1) ([#13260](https://www.github.com/tauri-apps/tauri/pull/13260) by [@FabianLars](https://www.github.com/tauri-apps/tauri/../../FabianLars)) The bundler now sets the `ARCH` env var to the current build target to prevent potential issues with `appimagetool`'s auto-detection.
+- [`e045fe32c`](https://www.github.com/tauri-apps/tauri/commit/e045fe32c9b0bed954916dc42528e28ee19f75b8) ([#13334](https://www.github.com/tauri-apps/tauri/pull/13334) by [@lucasfernog](https://www.github.com/tauri-apps/tauri/../../lucasfernog)) Fix custom Windows sign command failing to sign app uninstaller if it references relative paths.
+- [`bd8a7cf39`](https://www.github.com/tauri-apps/tauri/commit/bd8a7cf39df316bf27c73a303d5e650301af0104) ([#13581](https://www.github.com/tauri-apps/tauri/pull/13581) by [@martpie](https://www.github.com/tauri-apps/tauri/../../martpie)) Fixes app icon not being displayed on Gnome dock and grid view when using Wayland.
+- [`b52da29d5`](https://www.github.com/tauri-apps/tauri/commit/b52da29d5dbdb675ddba438a335e6a59f620e536) ([#13429](https://www.github.com/tauri-apps/tauri/pull/13429) by [@Legend-Master](https://www.github.com/tauri-apps/tauri/../../Legend-Master)) Fix `mainBinaryName` doesn't work when there's `.` in it
+
+### Dependencies
+
+- Upgraded to `tauri-utils@2.5.0`
+
+## \[2.4.0]
+
+### New Features
+
+- [`b0babb6df`](https://www.github.com/tauri-apps/tauri/commit/b0babb6df12dafe45c21a2c9c424fd86ffd75ca7) ([#12938](https://www.github.com/tauri-apps/tauri/pull/12938)) Added hebrew translation for the custom Tauri messages in the NSIS bundle.
+- [`0aa48fb9e`](https://www.github.com/tauri-apps/tauri/commit/0aa48fb9e4b9d7b5bf3522000a76ebc1836394ed) ([#13030](https://www.github.com/tauri-apps/tauri/pull/13030)) Added `bundleVersion` to iOS and macOS configuration to support specifying a `CFBundleVersion`.
+
+### Enhancements
+
+- [`8d994f60f`](https://www.github.com/tauri-apps/tauri/commit/8d994f60fe05ec0f45cbe926506bbe10b0d36e3c) ([#11676](https://www.github.com/tauri-apps/tauri/pull/11676)) Sign NSIS and WiX DLLs when bundling
+- [`8d994f60f`](https://www.github.com/tauri-apps/tauri/commit/8d994f60fe05ec0f45cbe926506bbe10b0d36e3c) ([#11676](https://www.github.com/tauri-apps/tauri/pull/11676)) Sign DLLs from resources.
+
+### Bug Fixes
+
+- [`9ea76503d`](https://www.github.com/tauri-apps/tauri/commit/9ea76503dcf8da11fab65550f4ab8d3565a424ef) ([#13186](https://www.github.com/tauri-apps/tauri/pull/13186)) Fix NSIS bundler can't include resources and sidecars with `$` in the path
+- [`2dccfab53`](https://www.github.com/tauri-apps/tauri/commit/2dccfab5321fef55d45f3a4c674b6151b1c4424a) ([#13236](https://www.github.com/tauri-apps/tauri/pull/13236)) Fix `fileAssociations` missing `LSHandlerRank` on macOS.
+
+### Dependencies
+
+- Upgraded to `tauri-utils@2.4.0`
+
+## \[2.3.1]
+
+### Bug Fixes
+
+- [`2138bbc21`](https://www.github.com/tauri-apps/tauri/commit/2138bbc21294785df5f4144670104387289f79c1) ([#13087](https://www.github.com/tauri-apps/tauri/pull/13087) by [@Legend-Master](https://www.github.com/tauri-apps/tauri/../../Legend-Master)) Fix NSIS installer displaying in wrong language if `SpanishInternational` is included
+
+### Dependencies
+
+- Upgraded to `tauri-utils@2.3.1`
+
+## \[2.3.0]
+
+### Enhancements
+
+- [`f981a5ee8`](https://www.github.com/tauri-apps/tauri/commit/f981a5ee8b292b9ea09329f60cecc7f688dda734) ([#12602](https://www.github.com/tauri-apps/tauri/pull/12602) by [@kxxt](https://www.github.com/tauri-apps/tauri/../../kxxt)) Add basic support for linux riscv64 platform.
+
+### Bug Fixes
+
+- [`3626b7a92`](https://www.github.com/tauri-apps/tauri/commit/3626b7a92be2890a82e8d5bd00d13887e199ea4a) ([#12759](https://www.github.com/tauri-apps/tauri/pull/12759) by [@ninjadev64](https://www.github.com/tauri-apps/tauri/../../ninjadev64)) Fix resources being bundled to the wrong path during RPM bundling when resources are specified as a map.
+- [`2b960dfd9`](https://www.github.com/tauri-apps/tauri/commit/2b960dfd9fdc995bd6474958c05783ff53b64b7e) ([#12643](https://www.github.com/tauri-apps/tauri/pull/12643) by [@animeshchaudhri](https://www.github.com/tauri-apps/tauri/../../animeshchaudhri)) Remove the autostart plugin registry entry when the app is uninstalled (NSIS only).
+
+### Dependencies
+
+- Upgraded to `tauri-utils@2.3.0`
+
+## \[2.2.4]
+
+### Enhancements
+
+- [`5eba0785c`](https://www.github.com/tauri-apps/tauri/commit/5eba0785c461a0d0bec47653eaf6ccdf5f05d347) ([#12605](https://www.github.com/tauri-apps/tauri/pull/12605) by [@niusia-ua](https://www.github.com/tauri-apps/tauri/../../niusia-ua)) Added Ukrainian translation for the custom tauri messages in the nsis bundle
+
+### Dependencies
+
+- Upgraded to `tauri-utils@2.2.0`
+- Upgraded to `tauri-macos-sign@2.1.0`
+
+## \[2.2.3]
+
+### Bug Fixes
+
+- [`de8600b4d`](https://www.github.com/tauri-apps/tauri/commit/de8600b4d9a04e809e078c8aea61825d1328201f) ([#12471](https://www.github.com/tauri-apps/tauri/pull/12471) by [@anatawa12](https://www.github.com/tauri-apps/tauri/../../anatawa12)) Bumped `nsis-tauri-utils` to `0.4.2` which fixes the following bugs:
+
+  - Fixed launch on start checkbox in nsis installer does not work well with applications that require elevated permissions
+  - Fixed nsis installer may fail to install if launched by updater plugin
+- [`fbe7c9ead`](https://www.github.com/tauri-apps/tauri/commit/fbe7c9ead76e71ca258c6f48bbb62185fcc37b1c) ([#12466](https://www.github.com/tauri-apps/tauri/pull/12466) by [@FabianLars](https://www.github.com/tauri-apps/tauri/../../FabianLars)) Fixed an issue that caused the compiled AppImage to miss webkitgtk's internal `libwebkit2gtkinjectedbundle.so` file.
+- [`f5a59b93b`](https://www.github.com/tauri-apps/tauri/commit/f5a59b93bfefb43ff131a7870b3c5d5e48c1ca1e) ([#12136](https://www.github.com/tauri-apps/tauri/pull/12136) by [@unknovvn](https://www.github.com/tauri-apps/tauri/../../unknovvn)) The NSIS bundler will now replace non-numeric build metadata with `0` instead of returning an error.
+- [`9dac2863a`](https://www.github.com/tauri-apps/tauri/commit/9dac2863afa70fb0bcddf859b284afba917f28ae) ([#12323](https://www.github.com/tauri-apps/tauri/pull/12323) by [@FabianLars](https://www.github.com/tauri-apps/tauri/../../FabianLars)) Skip signing the .dmg if self signing via `"signingIdentity": "-"` is used.
+- [`b8eb28877`](https://www.github.com/tauri-apps/tauri/commit/b8eb28877fe822dbe17999fc8af98ed7d0983679) ([#12427](https://www.github.com/tauri-apps/tauri/pull/12427) by [@Legend-Master](https://www.github.com/tauri-apps/tauri/../../Legend-Master)) Clean up `Software\${MANUFACTURER}\${PRODUCTNAME}` registry key in the NSIS uninstaller if "Delete application data" option is checked when uninstalling.
+
+## \[2.2.2]
+
+### Bug Fixes
+
+- [`72748cc45`](https://www.github.com/tauri-apps/tauri/commit/72748cc45cf670dd03c86c8deceb5942598f5ad9) ([#12365](https://www.github.com/tauri-apps/tauri/pull/12365) by [@don41382](https://www.github.com/tauri-apps/tauri/../../don41382)) Fixed an issue that caused the `.msi` installer not to lookup the `INSTALLDIR` set in the `nsis` installer.
+- [`cf771bf69`](https://www.github.com/tauri-apps/tauri/commit/cf771bf69aa26b62d11a54a69131c631505d8c55) ([#12402](https://www.github.com/tauri-apps/tauri/pull/12402) by [@FabianLars](https://www.github.com/tauri-apps/tauri/../../FabianLars)) Fixed an issue that caused the .msi installer to not contain root resources when there were .dll files present in the target directory.
+- [`07ccdc499`](https://www.github.com/tauri-apps/tauri/commit/07ccdc499c3240e7240be3abf95ef2d7d00b2dc7) ([#12324](https://www.github.com/tauri-apps/tauri/pull/12324) by [@FabianLars](https://www.github.com/tauri-apps/tauri/../../FabianLars)) Fixed an issue leading to NSIS based installers to not contain the `WebView2Loader.dll` file when targetting `windows-gnu`.
+
+## \[2.2.1]
+
+### Bug Fixes
+
+- [`cd1d026f9`](https://www.github.com/tauri-apps/tauri/commit/cd1d026f9799c26b04acb64f49e7ee0a8b193049) ([#11961](https://www.github.com/tauri-apps/tauri/pull/11961) by [@Legend-Master](https://www.github.com/tauri-apps/tauri/../../Legend-Master)) Fix tauri fails to build if the project path contains glob characters
+
+## \[2.2.0]
+
+### New Features
+
+- [`cccb308c7`](https://www.github.com/tauri-apps/tauri/commit/cccb308c7b559b0838138d6cea280665f060c925) ([#11562](https://www.github.com/tauri-apps/tauri/pull/11562) by [@jLynx](https://www.github.com/tauri-apps/tauri/../../jLynx)) Generate signature for `.deb` packages when `createUpdaterArtifacts` option is enabled.
+
+### Enhancements
+
+- [`93a3a043d`](https://www.github.com/tauri-apps/tauri/commit/93a3a043d39cc96515d51d98beeb14261d3a246b) ([#11727](https://www.github.com/tauri-apps/tauri/pull/11727) by [@Kiyozz](https://www.github.com/tauri-apps/tauri/../../Kiyozz)) Add support for `Portuguese` language for NSIS windows installer.
+- [`53f808674`](https://www.github.com/tauri-apps/tauri/commit/53f808674b2c0012bc44a41ced90e742afbb41e8) ([#11799](https://www.github.com/tauri-apps/tauri/pull/11799) by [@FabianLars](https://www.github.com/tauri-apps/tauri/../../FabianLars)) The bundler now reads the `TAURI_BUNDLER_DMG_IGNORE_CI` env var to decide whether to check for `CI: true` when building DMG files.
+
+### Dependencies
+
+- Upgraded to `tauri-utils@2.1.1`
+
 ## \[2.1.0]
 
 ### New Features

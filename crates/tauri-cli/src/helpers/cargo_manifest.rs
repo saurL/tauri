@@ -10,6 +10,8 @@ use std::{
   path::{Path, PathBuf},
 };
 
+use crate::interface::rust::get_workspace_dir;
+
 #[derive(Clone, Deserialize)]
 pub struct CargoLockPackage {
   pub name: String,
@@ -49,6 +51,18 @@ pub struct CargoManifest {
   pub dependencies: HashMap<String, CargoManifestDependency>,
 }
 
+pub fn cargo_manifest_and_lock(tauri_dir: &Path) -> (Option<CargoManifest>, Option<CargoLock>) {
+  let manifest: Option<CargoManifest> = fs::read_to_string(tauri_dir.join("Cargo.toml"))
+    .ok()
+    .and_then(|manifest_contents| toml::from_str(&manifest_contents).ok());
+
+  let lock: Option<CargoLock> = get_workspace_dir()
+    .ok()
+    .and_then(|p| fs::read_to_string(p.join("Cargo.lock")).ok())
+    .and_then(|s| toml::from_str(&s).ok());
+
+  (manifest, lock)
+}
 #[derive(Default)]
 pub struct CrateVersion {
   pub version: Option<String>,
@@ -97,15 +111,43 @@ impl std::fmt::Display for CrateVersion {
   }
 }
 
+// Reference: https://github.com/rust-lang/crates.io/blob/98c83c8231cbcd15d6b8f06d80a00ad462f71585/src/views.rs#L274
+#[derive(serde::Deserialize)]
+struct CrateMetadata {
+  /// The "default" version of this crate.
+  ///
+  /// This version will be displayed by default on the crate's page.
+  pub default_version: Option<String>,
+}
+
+// Reference: https://github.com/rust-lang/crates.io/blob/98c83c8231cbcd15d6b8f06d80a00ad462f71585/src/controllers/krate/metadata.rs#L44
+#[derive(serde::Deserialize)]
+struct CrateIoGetResponse {
+  /// The crate metadata.
+  #[serde(rename = "crate")]
+  krate: CrateMetadata,
+}
+
 pub fn crate_latest_version(name: &str) -> Option<String> {
-  let url = format!("https://docs.rs/crate/{name}/");
-  match ureq::get(&url).call() {
-    Ok(response) => match (response.status(), response.header("location")) {
-      (302, Some(location)) => Some(location.replace(&url, "")),
-      _ => None,
-    },
-    Err(_) => None,
-  }
+  // Reference: https://github.com/rust-lang/crates.io/blob/98c83c8231cbcd15d6b8f06d80a00ad462f71585/src/controllers/krate/metadata.rs#L88
+  let url = format!("https://crates.io/api/v1/crates/{name}?include");
+  #[cfg(feature = "platform-certs")]
+  let mut response = {
+    let agent = ureq::Agent::config_builder()
+      .tls_config(
+        ureq::tls::TlsConfig::builder()
+          .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+          .build(),
+      )
+      .build()
+      .new_agent();
+    agent.get(&url).call().ok()?
+  };
+  #[cfg(not(feature = "platform-certs"))]
+  let mut response = ureq::get(&url).call().ok()?;
+  let metadata: CrateIoGetResponse =
+    serde_json::from_reader(response.body_mut().as_reader()).unwrap();
+  metadata.krate.default_version
 }
 
 pub fn crate_version(

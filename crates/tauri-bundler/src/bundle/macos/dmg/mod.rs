@@ -5,7 +5,8 @@
 
 use super::{app, icon::create_icns_file};
 use crate::{
-  bundle::{common::CommandExt, settings::Arch, Bundle},
+  bundle::{settings::Arch, Bundle},
+  utils::CommandExt,
   PackageType, Settings,
 };
 
@@ -48,8 +49,7 @@ pub fn bundle_project(settings: &Settings, bundles: &[Bundle]) -> crate::Result<
       Arch::Universal => "universal",
       target => {
         return Err(crate::Error::ArchError(format!(
-          "Unsupported architecture: {:?}",
-          target
+          "Unsupported architecture: {target:?}"
         )));
       }
     }
@@ -58,7 +58,7 @@ pub fn bundle_project(settings: &Settings, bundles: &[Bundle]) -> crate::Result<
   let dmg_path = output_path.join(&dmg_name);
 
   let product_name = settings.product_name();
-  let bundle_file_name = format!("{}.app", product_name);
+  let bundle_file_name = format!("{product_name}.app");
   let bundle_dir = settings.project_out_directory().join("bundle/macos");
 
   let support_directory_path = output_path
@@ -68,10 +68,10 @@ pub fn bundle_project(settings: &Settings, bundles: &[Bundle]) -> crate::Result<
 
   for path in &[&support_directory_path, &output_path] {
     if path.exists() {
-      fs::remove_dir_all(path).with_context(|| format!("Failed to remove old {}", dmg_name))?;
+      fs::remove_dir_all(path).with_context(|| format!("Failed to remove old {dmg_name}"))?;
     }
     fs::create_dir_all(path)
-      .with_context(|| format!("Failed to create output directory at {:?}", path))?;
+      .with_context(|| format!("Failed to create output directory at {path:?}"))?;
   }
 
   // create paths for script
@@ -173,9 +173,11 @@ pub fn bundle_project(settings: &Settings, bundles: &[Bundle]) -> crate::Result<
 
   // Issue #592 - Building MacOS dmg files on CI
   // https://github.com/tauri-apps/tauri/issues/592
-  if let Some(value) = env::var_os("CI") {
-    if value == "true" {
-      bundle_dmg_cmd.arg("--skip-jenkins");
+  if env::var_os("TAURI_BUNDLER_DMG_IGNORE_CI").unwrap_or_default() != "true" {
+    if let Some(value) = env::var_os("CI") {
+      if value == "true" {
+        bundle_dmg_cmd.arg("--skip-jenkins");
+      }
     }
   }
 
@@ -191,16 +193,19 @@ pub fn bundle_project(settings: &Settings, bundles: &[Bundle]) -> crate::Result<
   fs::rename(bundle_dir.join(dmg_name), dmg_path.clone())?;
 
   // Sign DMG if needed
-
-  if let Some(keychain) = super::sign::keychain(settings.macos().signing_identity.as_deref())? {
-    super::sign::sign(
-      &keychain,
-      vec![super::sign::SignTarget {
-        path: dmg_path.clone(),
-        is_an_executable: false,
-      }],
-      settings,
-    )?;
+  // skipping self-signing DMGs https://github.com/tauri-apps/tauri/issues/12288
+  let identity = settings.macos().signing_identity.as_deref();
+  if identity != Some("-") {
+    if let Some(keychain) = super::sign::keychain(identity)? {
+      super::sign::sign(
+        &keychain,
+        vec![super::sign::SignTarget {
+          path: dmg_path.clone(),
+          is_an_executable: false,
+        }],
+        settings,
+      )?;
+    }
   }
 
   Ok(Bundled {

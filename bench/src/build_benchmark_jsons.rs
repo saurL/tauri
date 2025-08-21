@@ -2,8 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
-//! [![](https://github.com/tauri-apps/tauri/raw/dev/.github/splash.png)](https://tauri.app)
-//!
 //! This Rust binary runs on CI and provides internal metrics results of Tauri. To learn more see [benchmark_results](https://github.com/tauri-apps/benchmark_results) repository.
 //!
 //! ***_Internal use only_**
@@ -54,7 +52,7 @@ fn main() {
       .expect("Something wrong with tauri_data"),
     &serde_json::to_value(all_data).expect("Unable to build final json (all)"),
   )
-  .unwrap_or_else(|_| panic!("Unable to write {:?}", tauri_data));
+  .unwrap_or_else(|_| panic!("Unable to write {tauri_data:?}"));
 
   utils::write_json(
     tauri_recent
@@ -62,5 +60,5 @@ fn main() {
       .expect("Something wrong with tauri_recent"),
     &serde_json::to_value(recent).expect("Unable to build final json (recent)"),
   )
-  .unwrap_or_else(|_| panic!("Unable to write {:?}", tauri_recent));
+  .unwrap_or_else(|_| panic!("Unable to write {tauri_recent:?}"));
 }

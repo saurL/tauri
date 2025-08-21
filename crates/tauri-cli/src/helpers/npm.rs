@@ -3,9 +3,10 @@
 // SPDX-License-Identifier: MIT
 
 use anyhow::Context;
+use serde::Deserialize;
 
 use crate::helpers::cross_command;
-use std::{fmt::Display, path::Path, process::Command};
+use std::{collections::HashMap, fmt::Display, path::Path, process::Command};
 
 pub fn manager_version(package_manager: &str) -> Option<String> {
   cross_command(package_manager)
@@ -21,6 +22,17 @@ pub fn manager_version(package_manager: &str) -> Option<String> {
     })
     .ok()
     .unwrap_or_default()
+}
+
+fn detect_yarn_or_berry() -> PackageManager {
+  if manager_version("yarn")
+    .map(|v| v.chars().next().map(|c| c > '1').unwrap_or_default())
+    .unwrap_or(false)
+  {
+    PackageManager::YarnBerry
+  } else {
+    PackageManager::Yarn
+  }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -59,32 +71,38 @@ impl PackageManager {
       .unwrap_or(Self::Npm)
   }
 
+  /// Detects package manager from the `npm_config_user_agent` environment variable
+  fn from_environment_variable() -> Option<Self> {
+    let npm_config_user_agent = std::env::var("npm_config_user_agent").ok()?;
+    match npm_config_user_agent {
+      user_agent if user_agent.starts_with("pnpm/") => Some(Self::Pnpm),
+      user_agent if user_agent.starts_with("deno/") => Some(Self::Deno),
+      user_agent if user_agent.starts_with("bun/") => Some(Self::Bun),
+      user_agent if user_agent.starts_with("yarn/") => Some(detect_yarn_or_berry()),
+      user_agent if user_agent.starts_with("npm/") => Some(Self::Npm),
+      _ => None,
+    }
+  }
+
   /// Detects all possible package managers from the given directory.
   pub fn all_from_project<P: AsRef<Path>>(path: P) -> Vec<Self> {
+    if let Some(from_env) = Self::from_environment_variable() {
+      return vec![from_env];
+    }
+
     let mut found = Vec::new();
 
     if let Ok(entries) = std::fs::read_dir(path) {
       for entry in entries.flatten() {
         let path = entry.path();
         let name = path.file_name().unwrap().to_string_lossy();
-        if name.as_ref() == "package-lock.json" {
-          found.push(PackageManager::Npm);
-        } else if name.as_ref() == "pnpm-lock.yaml" {
-          found.push(PackageManager::Pnpm);
-        } else if name.as_ref() == "yarn.lock" {
-          let yarn = if manager_version("yarn")
-            .map(|v| v.chars().next().map(|c| c > '1').unwrap_or_default())
-            .unwrap_or(false)
-          {
-            PackageManager::YarnBerry
-          } else {
-            PackageManager::Yarn
-          };
-          found.push(yarn);
-        } else if name.as_ref() == "bun.lockb" {
-          found.push(PackageManager::Bun);
-        } else if name.as_ref() == "deno.lock" {
-          found.push(PackageManager::Deno);
+        match name.as_ref() {
+          "package-lock.json" => found.push(PackageManager::Npm),
+          "pnpm-lock.yaml" => found.push(PackageManager::Pnpm),
+          "yarn.lock" => found.push(detect_yarn_or_berry()),
+          "bun.lock" | "bun.lockb" => found.push(PackageManager::Bun),
+          "deno.lock" => found.push(PackageManager::Deno),
+          _ => (),
         }
       }
     }
@@ -180,6 +198,7 @@ impl PackageManager {
     Ok(())
   }
 
+  // TODO: Use `current_package_versions` as much as possible for better speed
   pub fn current_package_version<P: AsRef<Path>>(
     &self,
     name: &str,
@@ -237,4 +256,157 @@ impl PackageManager {
       Ok(None)
     }
   }
+
+  pub fn current_package_versions(
+    &self,
+    packages: &[String],
+    frontend_dir: &Path,
+  ) -> crate::Result<HashMap<String, semver::Version>> {
+    let output = match self {
+      PackageManager::Yarn => return yarn_package_versions(packages, frontend_dir),
+      PackageManager::YarnBerry => return yarn_berry_package_versions(packages, frontend_dir),
+      PackageManager::Pnpm => cross_command("pnpm")
+        .arg("list")
+        .args(packages)
+        .args(["--json", "--depth", "0"])
+        .current_dir(frontend_dir)
+        .output()?,
+      // Bun and Deno don't support `list` command
+      PackageManager::Npm | PackageManager::Bun | PackageManager::Deno => cross_command("npm")
+        .arg("list")
+        .args(packages)
+        .args(["--json", "--depth", "0"])
+        .current_dir(frontend_dir)
+        .output()?,
+    };
+
+    let mut versions = HashMap::new();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if !output.status.success() {
+      return Ok(versions);
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ListOutput {
+      #[serde(default)]
+      dependencies: HashMap<String, ListDependency>,
+      #[serde(default)]
+      dev_dependencies: HashMap<String, ListDependency>,
+    }
+
+    #[derive(Deserialize)]
+    struct ListDependency {
+      version: String,
+    }
+
+    let json: ListOutput = serde_json::from_str(&stdout)?;
+    for (package, dependency) in json.dependencies.into_iter().chain(json.dev_dependencies) {
+      let version = dependency.version;
+      if let Ok(version) = semver::Version::parse(&version) {
+        versions.insert(package, version);
+      } else {
+        log::error!("Failed to parse version `{version}` for NPM package `{package}`");
+      }
+    }
+    Ok(versions)
+  }
+}
+
+fn yarn_package_versions(
+  packages: &[String],
+  frontend_dir: &Path,
+) -> crate::Result<HashMap<String, semver::Version>> {
+  let output = cross_command("yarn")
+    .arg("list")
+    .args(packages)
+    .args(["--json", "--depth", "0"])
+    .current_dir(frontend_dir)
+    .output()?;
+
+  let mut versions = HashMap::new();
+  let stdout = String::from_utf8_lossy(&output.stdout);
+  if !output.status.success() {
+    return Ok(versions);
+  }
+
+  #[derive(Deserialize)]
+  struct YarnListOutput {
+    data: YarnListOutputData,
+  }
+
+  #[derive(Deserialize)]
+  struct YarnListOutputData {
+    trees: Vec<YarnListOutputDataTree>,
+  }
+
+  #[derive(Deserialize)]
+  struct YarnListOutputDataTree {
+    name: String,
+  }
+
+  for line in stdout.lines() {
+    if let Ok(tree) = serde_json::from_str::<YarnListOutput>(line) {
+      for tree in tree.data.trees {
+        let Some((name, version)) = tree.name.rsplit_once('@') else {
+          continue;
+        };
+        if let Ok(version) = semver::Version::parse(version) {
+          versions.insert(name.to_owned(), version);
+        } else {
+          log::error!("Failed to parse version `{version}` for NPM package `{name}`");
+        }
+      }
+      return Ok(versions);
+    }
+  }
+
+  Ok(versions)
+}
+
+fn yarn_berry_package_versions(
+  packages: &[String],
+  frontend_dir: &Path,
+) -> crate::Result<HashMap<String, semver::Version>> {
+  let output = cross_command("yarn")
+    .args(["info", "--json"])
+    .current_dir(frontend_dir)
+    .output()?;
+
+  let mut versions = HashMap::new();
+  let stdout = String::from_utf8_lossy(&output.stdout);
+  if !output.status.success() {
+    return Ok(versions);
+  }
+
+  #[derive(Deserialize)]
+  struct YarnBerryInfoOutput {
+    value: String,
+    children: YarnBerryInfoOutputChildren,
+  }
+
+  #[derive(Deserialize)]
+  #[serde(rename_all = "PascalCase")]
+  struct YarnBerryInfoOutputChildren {
+    version: String,
+  }
+
+  for line in stdout.lines() {
+    if let Ok(info) = serde_json::from_str::<YarnBerryInfoOutput>(line) {
+      let Some((name, _)) = info.value.rsplit_once('@') else {
+        continue;
+      };
+      if !packages.iter().any(|package| package == name) {
+        continue;
+      }
+      let version = info.children.version;
+      if let Ok(version) = semver::Version::parse(&version) {
+        versions.insert(name.to_owned(), version);
+      } else {
+        log::error!("Failed to parse version `{version}` for NPM package `{name}`");
+      }
+    }
+  }
+
+  Ok(versions)
 }

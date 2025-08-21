@@ -7,6 +7,48 @@ import { Image } from './image'
 import { Theme } from './window'
 
 /**
+ * Identifier type used for data stores on macOS and iOS.
+ *
+ * Represents a 128-bit identifier, commonly expressed as a 16-byte UUID.
+ */
+export type DataStoreIdentifier = [
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number
+]
+
+/**
+ * Bundle type of the current application.
+ */
+export enum BundleType {
+  /** Windows NSIS */
+  Nsis = 'nsis',
+  /** Windows MSI */
+  Msi = 'msi',
+  /** Linux Debian package */
+  Deb = 'deb',
+  /** Linux RPM */
+  Rpm = 'rpm',
+  /** Linux AppImage */
+  AppImage = 'appimage',
+  /** macOS app bundle */
+  App = 'app'
+}
+
+/**
  * Application metadata and related APIs.
  *
  * @module
@@ -41,7 +83,7 @@ async function getName(): Promise<string> {
 }
 
 /**
- * Gets the Tauri version.
+ * Gets the Tauri framework version used by this application.
  *
  * @example
  * ```typescript
@@ -56,7 +98,24 @@ async function getTauriVersion(): Promise<string> {
 }
 
 /**
- * Shows the application on macOS. This function does not automatically focus any specific app window.
+ * Gets the application identifier.
+ * @example
+ * ```typescript
+ * import { getIdentifier } from '@tauri-apps/api/app';
+ * const identifier = await getIdentifier();
+ * ```
+ *
+ * @returns The application identifier as configured in `tauri.conf.json`.
+ *
+ * @since 2.4.0
+ */
+async function getIdentifier(): Promise<string> {
+  return invoke('plugin:app|identifier')
+}
+
+/**
+ * Shows the application on macOS. This function does not automatically
+ * focus any specific app window.
  *
  * @example
  * ```typescript
@@ -86,16 +145,55 @@ async function hide(): Promise<void> {
 }
 
 /**
- * Get the default window icon.
+ * Fetches the data store identifiers on macOS and iOS.
+ *
+ * See https://developer.apple.com/documentation/webkit/wkwebsitedatastore for more information.
+ *
+ * @example
+ * ```typescript
+ * import { fetchDataStoreIdentifiers } from '@tauri-apps/api/app';
+ * const ids = await fetchDataStoreIdentifiers();
+ * ```
+ *
+ * @since 2.4.0
+ */
+async function fetchDataStoreIdentifiers(): Promise<DataStoreIdentifier[]> {
+  return invoke('plugin:app|fetch_data_store_identifiers')
+}
+
+/**
+ * Removes the data store with the given identifier.
+ *
+ * Note that any webview using this data store should be closed before running this API.
+ *
+ * See https://developer.apple.com/documentation/webkit/wkwebsitedatastore for more information.
+ *
+ * @example
+ * ```typescript
+ * import { fetchDataStoreIdentifiers, removeDataStore } from '@tauri-apps/api/app';
+ * for (const id of (await fetchDataStoreIdentifiers())) {
+ *   await removeDataStore(id);
+ * }
+ * ```
+ *
+ * @since 2.4.0
+ */
+async function removeDataStore(uuid: DataStoreIdentifier): Promise<void> {
+  return invoke('plugin:app|remove_data_store', { uuid })
+}
+
+/**
+ * Gets the default window icon.
  *
  * @example
  * ```typescript
  * import { defaultWindowIcon } from '@tauri-apps/api/app';
- * await defaultWindowIcon();
+ * const icon = await defaultWindowIcon();
  * ```
  *
  * @since 2.0.0
  */
+
 async function defaultWindowIcon(): Promise<Image | null> {
   return invoke<number | null>('plugin:app|default_window_icon').then((rid) =>
     rid ? new Image(rid) : null
@@ -103,7 +201,8 @@ async function defaultWindowIcon(): Promise<Image | null> {
 }
 
 /**
- * Set app's theme, pass in `null` or `undefined` to follow system theme
+ * Sets the application's theme. Pass in `null` or `undefined` to follow
+ * the system theme.
  *
  * @example
  * ```typescript
@@ -121,12 +220,49 @@ async function setTheme(theme?: Theme | null): Promise<void> {
   return invoke('plugin:app|set_app_theme', { theme })
 }
 
+/**
+ * Sets the dock visibility for the application on macOS.
+ *
+ * @param visible - Whether the dock should be visible or not.
+ *
+ * @example
+ * ```typescript
+ * import { setDockVisibility } from '@tauri-apps/api/app';
+ * await setDockVisibility(false);
+ * ```
+ *
+ * @since 2.5.0
+ */
+async function setDockVisibility(visible: boolean): Promise<void> {
+  return invoke('plugin:app|set_dock_visibility', { visible })
+}
+
+/**
+ * Gets the application bundle type.
+ *
+ * @example
+ * ```typescript
+ * import { getBundleType } from '@tauri-apps/api/app';
+ * const type = await getBundleType();
+ * ```
+ *
+ * @since 2.5.0
+ */
+async function getBundleType(): Promise<BundleType> {
+  return invoke('plugin:app|bundle_type')
+}
+
 export {
   getName,
   getVersion,
   getTauriVersion,
+  getIdentifier,
   show,
   hide,
   defaultWindowIcon,
-  setTheme
+  setTheme,
+  fetchDataStoreIdentifiers,
+  removeDataStore,
+  setDockVisibility,
+  getBundleType
 }

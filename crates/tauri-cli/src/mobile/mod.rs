@@ -5,12 +5,11 @@
 use crate::{
   helpers::{
     app_paths::tauri_dir,
-    config::{reload as reload_config, Config as TauriConfig, ConfigHandle},
+    config::{reload as reload_config, Config as TauriConfig, ConfigHandle, ConfigMetadata},
   },
   interface::{AppInterface, AppSettings, DevProcess, Interface, Options as InterfaceOptions},
   ConfigValue,
 };
-#[cfg(unix)]
 use anyhow::Context;
 use anyhow::{bail, Result};
 use heck::ToSnekCase;
@@ -187,7 +186,7 @@ pub struct CliOptions {
   pub args: Vec<String>,
   pub noise_level: NoiseLevel,
   pub vars: HashMap<String, OsString>,
-  pub config: Option<ConfigValue>,
+  pub config: Vec<ConfigValue>,
   pub target_device: Option<TargetDevice>,
 }
 
@@ -199,7 +198,7 @@ impl Default for CliOptions {
       args: vec!["--lib".into()],
       noise_level: Default::default(),
       vars: Default::default(),
-      config: None,
+      config: Vec::new(),
       target_device: None,
     }
   }
@@ -292,26 +291,21 @@ fn use_network_address_for_dev_url(
         url.path()
       ))?;
 
-      if let Some(c) = &mut dev_options.config {
-        if let Some(build) = c
-          .0
-          .as_object_mut()
-          .and_then(|root| root.get_mut("build"))
-          .and_then(|build| build.as_object_mut())
-        {
-          build.insert("devUrl".into(), url.to_string().into());
-        }
-      } else {
-        let mut build = serde_json::Map::new();
-        build.insert("devUrl".into(), url.to_string().into());
+      dev_options
+        .config
+        .push(crate::ConfigValue(serde_json::json!({
+          "build": {
+            "devUrl": url
+          }
+        })));
 
-        dev_options
+      reload_config(
+        &dev_options
           .config
-          .replace(crate::ConfigValue(serde_json::json!({
-            "build": build
-          })));
-      }
-      reload_config(dev_options.config.as_ref().map(|c| &c.0))?;
+          .iter()
+          .map(|conf| &conf.0)
+          .collect::<Vec<_>>(),
+      )?;
 
       Some(ip)
     } else {
@@ -370,7 +364,10 @@ fn env() -> Result<Env, EnvError> {
 pub struct OptionsHandle(#[allow(unused)] Runtime, #[allow(unused)] ServerHandle);
 
 /// Writes CLI options to be used later on the Xcode and Android Studio build commands
-pub fn write_options(identifier: &str, mut options: CliOptions) -> crate::Result<OptionsHandle> {
+pub fn write_options(
+  config: &ConfigMetadata,
+  mut options: CliOptions,
+) -> crate::Result<OptionsHandle> {
   options.vars.extend(env_vars());
 
   let runtime = Runtime::new().unwrap();
@@ -388,18 +385,28 @@ pub fn write_options(identifier: &str, mut options: CliOptions) -> crate::Result
   let (handle, addr) = r?;
 
   write(
-    temp_dir().join(format!("{identifier}-server-addr")),
+    temp_dir().join(format!(
+      "{}-server-addr",
+      config
+        .original_identifier()
+        .context("app configuration is missing an identifier")?
+    )),
     addr.to_string(),
   )?;
 
   Ok(OptionsHandle(runtime, handle))
 }
 
-fn read_options(identifier: &str) -> CliOptions {
+fn read_options(config: &ConfigMetadata) -> CliOptions {
   let runtime = tokio::runtime::Runtime::new().unwrap();
   let options = runtime
     .block_on(async move {
-      let addr_path = temp_dir().join(format!("{identifier}-server-addr"));
+      let addr_path = temp_dir().join(format!(
+        "{}-server-addr",
+        config
+          .original_identifier()
+          .context("app configuration is missing an identifier")?
+      ));
       let (tx, rx) = WsTransportClientBuilder::default()
         .build(
           format!(

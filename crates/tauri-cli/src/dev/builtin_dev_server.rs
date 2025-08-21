@@ -79,7 +79,7 @@ pub fn start<P: AsRef<Path>>(dir: P, ip: IpAddr, port: Option<u16>) -> crate::Re
 }
 
 async fn handler(uri: Uri, state: State<ServerState>) -> impl IntoResponse {
-  // Frontend files should not contain query parameters. This seems to be how vite handles it.
+  // Frontend files should not contain query parameters. This seems to be how Vite handles it.
   let uri = uri.path();
 
   let uri = if uri == "/" {
@@ -116,7 +116,7 @@ async fn ws_handler(ws: WebSocketUpgrade, state: State<ServerState>) -> Response
         _ = ws.recv() => return,
         fs_reload_event = rx.recv() => fs_reload_event.is_ok(),
     } {
-      let msg = ws::Message::Text(r#"{"reload": true}"#.to_owned());
+      let msg = ws::Message::Text(r#"{"reload": true}"#.into());
       if ws.send(msg).await.is_err() {
         break;
       }
@@ -138,7 +138,9 @@ fn inject_address(html_bytes: Vec<u8>, address: &SocketAddr) -> Vec<u8> {
     }
   }
 
-  let mut document = kuchiki::parse_html().one(String::from_utf8_lossy(&html_bytes).into_owned());
+  let mut document = kuchiki::parse_html()
+    .one(String::from_utf8_lossy(&html_bytes).into_owned())
+    .document_node;
   with_html_head(&mut document, |head| {
     let script = RELOAD_SCRIPT.replace("{{reload_url}}", &format!("ws://{address}/__tauri_cli"));
     let script_el = NodeRef::new_element(QualName::new(None, ns!(html), "script".into()), None);
@@ -162,17 +164,20 @@ fn watch<F: Fn() + Send + 'static>(dir: PathBuf, handler: F) {
   thread::spawn(move || {
     let (tx, rx) = std::sync::mpsc::channel();
 
-    let mut watcher = notify_debouncer_mini::new_debouncer(Duration::from_secs(1), tx)
+    let mut watcher = notify_debouncer_full::new_debouncer(Duration::from_secs(1), None, tx)
       .expect("failed to start builtin server fs watcher");
 
     watcher
-      .watcher()
       .watch(&dir, notify::RecursiveMode::Recursive)
       .expect("builtin server failed to watch dir");
 
     loop {
-      if rx.recv().is_ok() {
-        handler();
+      if let Ok(Ok(event)) = rx.recv() {
+        if let Some(event) = event.first() {
+          if !event.kind.is_access() {
+            handler();
+          }
+        }
       }
     }
   });

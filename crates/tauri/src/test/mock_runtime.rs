@@ -134,6 +134,12 @@ impl<T: UserEvent> RuntimeHandle<T> for MockRuntimeHandle {
     Ok(())
   }
 
+  #[cfg(target_os = "macos")]
+  #[cfg_attr(docsrs, doc(cfg(target_os = "macos")))]
+  fn set_dock_visibility(&self, visible: bool) -> Result<()> {
+    Ok(())
+  }
+
   fn request_exit(&self, code: i32) -> Result<()> {
     unimplemented!()
   }
@@ -264,6 +270,10 @@ impl<T: UserEvent> RuntimeHandle<T> for MockRuntimeHandle {
     Ok(())
   }
 
+  fn set_device_event_filter(&self, _: DeviceEventFilter) {
+    // no-op
+  }
+
   #[cfg(target_os = "android")]
   fn find_class<'a>(
     &self,
@@ -279,6 +289,23 @@ impl<T: UserEvent> RuntimeHandle<T> for MockRuntimeHandle {
   where
     F: FnOnce(&mut jni::JNIEnv, &jni::objects::JObject, &jni::objects::JObject) + Send + 'static,
   {
+    todo!()
+  }
+
+  #[cfg(any(target_os = "macos", target_os = "ios"))]
+  fn fetch_data_store_identifiers<F: FnOnce(Vec<[u8; 16]>) + Send + 'static>(
+    &self,
+    cb: F,
+  ) -> Result<()> {
+    todo!()
+  }
+
+  #[cfg(any(target_os = "macos", target_os = "ios"))]
+  fn remove_data_store<F: FnOnce(Result<()>) + Send + 'static>(
+    &self,
+    uuid: [u8; 16],
+    cb: F,
+  ) -> Result<()> {
     todo!()
   }
 
@@ -348,6 +375,14 @@ impl WindowBuilder for MockWindowBuilder {
     self
   }
 
+  fn prevent_overflow(self) -> Self {
+    self
+  }
+
+  fn prevent_overflow_with_margin(self, margin: tauri_runtime::dpi::Size) -> Self {
+    self
+  }
+
   fn resizable(self, resizable: bool) -> Self {
     self
   }
@@ -373,6 +408,10 @@ impl WindowBuilder for MockWindowBuilder {
   }
 
   fn focused(self, focused: bool) -> Self {
+    self
+  }
+
+  fn focusable(self, focusable: bool) -> Self {
     self
   }
 
@@ -466,6 +505,11 @@ impl WindowBuilder for MockWindowBuilder {
   }
 
   #[cfg(target_os = "macos")]
+  fn traffic_light_position<P: Into<Position>>(self, position: P) -> Self {
+    self
+  }
+
+  #[cfg(target_os = "macos")]
   fn hidden_title(self, transparent: bool) -> Self {
     self
   }
@@ -538,8 +582,8 @@ impl<T: UserEvent> WebviewDispatch<T> for MockWebviewDispatcher {
     Ok(self.url.lock().unwrap().clone())
   }
 
-  fn bounds(&self) -> Result<tauri_runtime::Rect> {
-    Ok(tauri_runtime::Rect::default())
+  fn bounds(&self) -> Result<tauri_runtime::dpi::Rect> {
+    Ok(tauri_runtime::dpi::Rect::default())
   }
 
   fn position(&self) -> Result<PhysicalPosition<i32>> {
@@ -558,6 +602,10 @@ impl<T: UserEvent> WebviewDispatch<T> for MockWebviewDispatcher {
     Ok(())
   }
 
+  fn reload(&self) -> Result<()> {
+    Ok(())
+  }
+
   fn print(&self) -> Result<()> {
     Ok(())
   }
@@ -566,7 +614,7 @@ impl<T: UserEvent> WebviewDispatch<T> for MockWebviewDispatcher {
     Ok(())
   }
 
-  fn set_bounds(&self, bounds: tauri_runtime::Rect) -> Result<()> {
+  fn set_bounds(&self, bounds: tauri_runtime::dpi::Rect) -> Result<()> {
     Ok(())
   }
 
@@ -583,6 +631,22 @@ impl<T: UserEvent> WebviewDispatch<T> for MockWebviewDispatcher {
   }
 
   fn reparent(&self, window_id: WindowId) -> Result<()> {
+    Ok(())
+  }
+
+  fn cookies(&self) -> Result<Vec<tauri_runtime::Cookie<'static>>> {
+    Ok(Vec::new())
+  }
+
+  fn cookies_for_url(&self, url: Url) -> Result<Vec<tauri_runtime::Cookie<'static>>> {
+    Ok(Vec::new())
+  }
+
+  fn set_cookie(&self, cookie: tauri_runtime::Cookie<'_>) -> Result<()> {
+    Ok(())
+  }
+
+  fn delete_cookie(&self, cookie: tauri_runtime::Cookie<'_>) -> Result<()> {
     Ok(())
   }
 
@@ -933,7 +997,16 @@ impl<T: UserEvent> WindowDispatch<T> for MockWindowDispatcher {
     Ok(())
   }
 
+  #[cfg(target_os = "macos")]
+  fn set_simple_fullscreen(&self, enable: bool) -> Result<()> {
+    Ok(())
+  }
+
   fn set_focus(&self) -> Result<()> {
+    Ok(())
+  }
+
+  fn set_focusable(&self, focusable: bool) -> Result<()> {
     Ok(())
   }
 
@@ -977,7 +1050,23 @@ impl<T: UserEvent> WindowDispatch<T> for MockWindowDispatcher {
     Ok(())
   }
 
+  fn set_badge_count(&self, count: Option<i64>, desktop_filename: Option<String>) -> Result<()> {
+    Ok(())
+  }
+
+  fn set_badge_label(&self, label: Option<String>) -> Result<()> {
+    Ok(())
+  }
+
+  fn set_overlay_icon(&self, icon: Option<Icon<'_>>) -> Result<()> {
+    Ok(())
+  }
+
   fn set_title_bar_style(&self, style: tauri_utils::TitleBarStyle) -> Result<()> {
+    Ok(())
+  }
+
+  fn set_traffic_light_position(&self, position: Position) -> Result<()> {
     Ok(())
   }
 
@@ -998,6 +1087,10 @@ impl<T: UserEvent> WindowDispatch<T> for MockWindowDispatcher {
 
   fn is_enabled(&self) -> Result<bool> {
     Ok(true)
+  }
+
+  fn is_always_on_top(&self) -> Result<bool> {
+    Ok(false)
   }
 
   fn set_background_color(&self, color: Option<tauri_utils::config::Color>) -> Result<()> {
@@ -1157,6 +1250,10 @@ impl<T: UserEvent> Runtime<T> for MockRuntime {
 
   #[cfg(target_os = "macos")]
   #[cfg_attr(docsrs, doc(cfg(target_os = "macos")))]
+  fn set_dock_visibility(&mut self, visible: bool) {}
+
+  #[cfg(target_os = "macos")]
+  #[cfg_attr(docsrs, doc(cfg(target_os = "macos")))]
   fn show(&self) {}
 
   #[cfg(target_os = "macos")]
@@ -1175,6 +1272,12 @@ impl<T: UserEvent> Runtime<T> for MockRuntime {
     target_os = "openbsd"
   ))]
   fn run_iteration<F: FnMut(RunEvent<T>)>(&mut self, callback: F) {}
+
+  fn run_return<F: FnMut(RunEvent<T>) + 'static>(self, callback: F) -> i32 {
+    self.run(callback);
+
+    0
+  }
 
   fn run<F: FnMut(RunEvent<T>) + 'static>(self, mut callback: F) {
     self.is_running.store(true, Ordering::Relaxed);

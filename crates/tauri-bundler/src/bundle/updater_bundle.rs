@@ -3,8 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
-use super::common;
-
 use crate::{
   bundle::{
     windows::{
@@ -13,9 +11,10 @@ use crate::{
     },
     Bundle,
   },
+  utils::fs_utils,
   Settings,
 };
-use tauri_utils::display_path;
+use tauri_utils::{display_path, platform::Target as TargetPlatform};
 
 use std::{
   fs::{self, File},
@@ -28,14 +27,9 @@ use zip::write::SimpleFileOptions;
 
 // Build update
 pub fn bundle_project(settings: &Settings, bundles: &[Bundle]) -> crate::Result<Vec<PathBuf>> {
-  let target_os = settings
-    .target()
-    .split('-')
-    .nth(2)
-    .unwrap_or(std::env::consts::OS)
-    .replace("darwin", "macos");
+  let target_os = settings.target_platform();
 
-  if target_os == "windows" {
+  if matches!(target_os, TargetPlatform::Windows) {
     return bundle_update_windows(settings, bundles);
   }
 
@@ -194,7 +188,7 @@ fn bundle_update_windows(settings: &Settings, bundles: &[Bundle]) -> crate::Resu
           p.push(c);
           (p, b)
         });
-    let archived_path = archived_path.with_extension(format!("{}.zip", bundle_name));
+    let archived_path = archived_path.with_extension(format!("{bundle_name}.zip"));
 
     log::info!(action = "Bundling"; "{}", display_path(&archived_path));
 
@@ -210,7 +204,7 @@ fn bundle_update_windows(settings: &Settings, bundles: &[Bundle]) -> crate::Resu
 pub fn create_zip(src_file: &Path, dst_file: &Path) -> crate::Result<PathBuf> {
   let parent_dir = dst_file.parent().expect("No data in parent");
   fs::create_dir_all(parent_dir)?;
-  let writer = common::create_file(dst_file)?;
+  let writer = fs_utils::create_file(dst_file)?;
 
   let file_name = src_file
     .file_name()
@@ -235,7 +229,7 @@ pub fn create_zip(src_file: &Path, dst_file: &Path) -> crate::Result<PathBuf> {
 fn create_tar(src_dir: &Path, dest_path: &Path) -> crate::Result<PathBuf> {
   use flate2::{write::GzEncoder, Compression};
 
-  let dest_file = common::create_file(dest_path)?;
+  let dest_file = fs_utils::create_file(dest_path)?;
   let gzip_encoder = GzEncoder::new(dest_file, Compression::default());
 
   let gzip_encoder = create_tar_from_src(src_dir, gzip_encoder)?;

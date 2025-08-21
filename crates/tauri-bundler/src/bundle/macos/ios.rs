@@ -13,7 +13,10 @@
 // See https://developer.apple.com/go/?id=bundle-structure for a full
 // explanation.
 
-use crate::{bundle::common, Settings};
+use crate::{
+  utils::{self, fs_utils},
+  Settings,
+};
 
 use anyhow::Context;
 use image::{codecs::png::PngDecoder, GenericImageView, ImageDecoder};
@@ -42,16 +45,16 @@ pub fn bundle_project(settings: &Settings) -> crate::Result<Vec<PathBuf>> {
 
   if app_bundle_path.exists() {
     fs::remove_dir_all(&app_bundle_path)
-      .with_context(|| format!("Failed to remove old {}", app_product_name))?;
+      .with_context(|| format!("Failed to remove old {app_product_name}"))?;
   }
   fs::create_dir_all(&app_bundle_path)
-    .with_context(|| format!("Failed to create bundle directory at {:?}", app_bundle_path))?;
+    .with_context(|| format!("Failed to create bundle directory at {app_bundle_path:?}"))?;
 
   for src in settings.resource_files() {
     let src = src?;
     let dest = app_bundle_path.join(tauri_utils::resources::resource_relpath(&src));
-    common::copy_file(&src, &dest)
-      .with_context(|| format!("Failed to copy resource file {:?}", src))?;
+    fs_utils::copy_file(&src, &dest)
+      .with_context(|| format!("Failed to copy resource file {src:?}"))?;
   }
 
   let icon_filenames = generate_icon_files(&app_bundle_path, settings)
@@ -61,8 +64,8 @@ pub fn bundle_project(settings: &Settings) -> crate::Result<Vec<PathBuf>> {
 
   for bin in settings.binaries() {
     let bin_path = settings.binary_path(bin);
-    common::copy_file(&bin_path, app_bundle_path.join(bin.name()))
-      .with_context(|| format!("Failed to copy binary from {:?}", bin_path))?;
+    fs_utils::copy_file(&bin_path, &app_bundle_path.join(bin.name()))
+      .with_context(|| format!("Failed to copy binary from {bin_path:?}"))?;
   }
 
   Ok(vec![app_bundle_path])
@@ -93,11 +96,11 @@ fn generate_icon_files(bundle_dir: &Path, settings: &Settings) -> crate::Result<
       let decoder = PngDecoder::new(BufReader::new(File::open(&icon_path)?))?;
       let width = decoder.dimensions().0;
       let height = decoder.dimensions().1;
-      let is_retina = common::is_retina(&icon_path);
+      let is_retina = utils::is_retina(&icon_path);
       if !sizes.contains(&(width, height, is_retina)) {
         sizes.insert((width, height, is_retina));
         let dest_path = get_dest_path(width, height, is_retina);
-        common::copy_file(&icon_path, &dest_path)?;
+        fs_utils::copy_file(&icon_path, &dest_path)?;
       }
     }
     // Fall back to non-PNG files for any missing sizes.
@@ -121,12 +124,12 @@ fn generate_icon_files(bundle_dir: &Path, settings: &Settings) -> crate::Result<
       } else {
         let icon = image::open(&icon_path)?;
         let (width, height) = icon.dimensions();
-        let is_retina = common::is_retina(&icon_path);
+        let is_retina = utils::is_retina(&icon_path);
         if !sizes.contains(&(width, height, is_retina)) {
           sizes.insert((width, height, is_retina));
           let dest_path = get_dest_path(width, height, is_retina);
           icon.write_to(
-            &mut common::create_file(&dest_path)?,
+            &mut fs_utils::create_file(&dest_path)?,
             image::ImageFormat::Png,
           )?;
         }
@@ -142,7 +145,7 @@ fn generate_info_plist(
   settings: &Settings,
   icon_filenames: &[String],
 ) -> crate::Result<()> {
-  let file = &mut common::create_file(&bundle_dir.join("Info.plist"))?;
+  let file = &mut fs_utils::create_file(&bundle_dir.join("Info.plist"))?;
   writeln!(
     file,
     "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
@@ -175,7 +178,11 @@ fn generate_info_plist(
   writeln!(
     file,
     "  <key>CFBundleVersion</key>\n  <string>{}</string>",
-    settings.version_string()
+    settings
+      .ios()
+      .bundle_version
+      .as_deref()
+      .unwrap_or_else(|| settings.version_string())
   )?;
   writeln!(
     file,
@@ -190,7 +197,7 @@ fn generate_info_plist(
   if !icon_filenames.is_empty() {
     writeln!(file, "  <key>CFBundleIconFiles</key>\n  <array>")?;
     for filename in icon_filenames {
-      writeln!(file, "    <string>{}</string>", filename)?;
+      writeln!(file, "    <string>{filename}</string>")?;
     }
     writeln!(file, "  </array>")?;
   }

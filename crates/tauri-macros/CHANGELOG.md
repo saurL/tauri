@@ -1,5 +1,72 @@
 # Changelog
 
+## \[2.4.0]
+
+### Dependencies
+
+- Upgraded to `tauri-utils@2.7.0`.
+- Upgraded to `tauri-codegen@2.4.0`
+
+## \[2.3.2]
+
+### Dependencies
+
+- Upgraded to `tauri-utils@2.6.0`
+- Upgraded to `tauri-codegen@2.3.1`
+
+## \[2.3.1]
+
+### Performance Improvements
+
+- [`0a552a868`](https://www.github.com/tauri-apps/tauri/commit/0a552a868c559d367d85c264bf052009b048bd8e) ([#13690](https://www.github.com/tauri-apps/tauri/pull/13690) by [@montyc1999](https://www.github.com/tauri-apps/tauri/../../montyc1999)) Cache `rustc -V` output in `#[tauri::command]` macros
+
+## \[2.2.1]
+
+### Dependencies
+
+- Upgraded to `tauri-codegen@2.3.0`
+- Upgraded to `tauri-utils@2.5.0`
+
+## \[2.2.0]
+
+### Dependencies
+
+- Upgraded to `tauri-utils@2.4.0`
+- Upgraded to `tauri-codegen@2.2.0`
+- [`48b12b440`](https://www.github.com/tauri-apps/tauri/commit/48b12b440478937c46fdfef9f9d95194be117020) Update to `tauri-utils@2.4.0`
+
+## \[2.1.1]
+
+### Dependencies
+
+- Upgraded to `tauri-utils@2.3.1`
+- Upgraded to `tauri-codegen@2.1.1`
+
+## \[2.1.0]
+
+### New Features
+
+- [`013f8f652`](https://www.github.com/tauri-apps/tauri/commit/013f8f652302f2d49c5ec0a075582033d8b074fb) ([#12890](https://www.github.com/tauri-apps/tauri/pull/12890) by [@Legend-Master](https://www.github.com/tauri-apps/tauri/../../Legend-Master)) Added `build > removeUnusedCommands` to trigger the build scripts and macros to remove unused commands based on the capabilities you defined. Note this won't be accounting for dynamically added ACLs so make sure to check it when using this.
+
+### Dependencies
+
+- Upgraded to `tauri-utils@2.3.0`
+- Upgraded to `tauri-codegen@2.1.0`
+
+## \[2.0.5]
+
+### Dependencies
+
+- Upgraded to `tauri-utils@2.2.0`
+- Upgraded to `tauri-codegen@2.0.5`
+
+## \[2.0.4]
+
+### Dependencies
+
+- Upgraded to `tauri-utils@2.1.1`
+- Upgraded to `tauri-codegen@2.0.4`
+
 ## \[2.0.3]
 
 ### Enhancements

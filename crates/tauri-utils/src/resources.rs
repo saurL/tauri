@@ -9,6 +9,8 @@ use std::{
 
 use walkdir::WalkDir;
 
+use crate::platform::Target as TargetPlatform;
+
 /// Given a path (absolute or relative) to a resource file, returns the
 /// relative path from the bundle resources directory where that resource
 /// should be stored.
@@ -41,19 +43,19 @@ fn normalize(path: &Path) -> PathBuf {
 }
 
 /// Parses the external binaries to bundle, adding the target triple suffix to each of them.
-pub fn external_binaries(external_binaries: &[String], target_triple: &str) -> Vec<String> {
+pub fn external_binaries(
+  external_binaries: &[String],
+  target_triple: &str,
+  target_platform: &TargetPlatform,
+) -> Vec<String> {
   let mut paths = Vec::new();
   for curr_path in external_binaries {
-    paths.push(format!(
-      "{}-{}{}",
-      curr_path,
-      target_triple,
-      if target_triple.contains("windows") {
-        ".exe"
-      } else {
-        ""
-      }
-    ));
+    let extension = if matches!(target_platform, TargetPlatform::Windows) {
+      ".exe"
+    } else {
+      ""
+    };
+    paths.push(format!("{curr_path}-{target_triple}{extension}"));
   }
   paths
 }
@@ -142,7 +144,7 @@ pub struct ResourcePathsIter<'a> {
   glob_iter: Option<glob::Paths>,
 }
 
-impl<'a> ResourcePathsIter<'a> {
+impl ResourcePathsIter<'_> {
   fn next_glob_iter(&mut self) -> Option<crate::Result<Resource>> {
     let entry = self.glob_iter.as_mut().unwrap().next()?;
 
@@ -237,10 +239,7 @@ impl<'a> ResourcePathsIter<'a> {
     self.current_path = None;
 
     let pattern = match &mut self.pattern_iter {
-      PatternIter::Slice(iter) => match iter.next() {
-        Some(pattern) => pattern,
-        None => return None,
-      },
+      PatternIter::Slice(iter) => iter.next()?,
       PatternIter::Map(iter) => match iter.next() {
         Some((pattern, dest)) => {
           self.current_pattern = Some(pattern.clone());
@@ -270,7 +269,7 @@ impl<'a> ResourcePathsIter<'a> {
   }
 }
 
-impl<'a> Iterator for ResourcePaths<'a> {
+impl Iterator for ResourcePaths<'_> {
   type Item = crate::Result<PathBuf>;
 
   fn next(&mut self) -> Option<crate::Result<PathBuf>> {
@@ -278,7 +277,7 @@ impl<'a> Iterator for ResourcePaths<'a> {
   }
 }
 
-impl<'a> Iterator for ResourcePathsIter<'a> {
+impl Iterator for ResourcePathsIter<'_> {
   type Item = crate::Result<Resource>;
 
   fn next(&mut self) -> Option<crate::Result<Resource>> {
@@ -329,7 +328,7 @@ mod tests {
 
   fn setup_test_dirs() {
     let mut random = [0; 1];
-    getrandom::getrandom(&mut random).unwrap();
+    getrandom::fill(&mut random).unwrap();
 
     let temp = std::env::temp_dir();
     let temp = temp.join(format!("tauri_resource_paths_iter_test_{}", random[0]));

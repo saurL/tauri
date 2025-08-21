@@ -70,3 +70,5 @@ opt-level = "s"
 [patch.crates-io]
 schemars_derive = { git = 'https://github.com/tauri-apps/schemars.git', branch = 'feat/preserve-description-newlines' }
 tauri = { path = "./crates/tauri" }
+tauri-plugin = { path = "./crates/tauri-plugin" }
+tao = { git = "https://github.com/sgammon/tao.git", rev = "79cae516189f4a1253ff2956295ec3c9411a4383" }

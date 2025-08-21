@@ -4,7 +4,7 @@
 
 use super::{ensure_init, env, get_app, get_config, read_options, MobileTarget};
 use crate::{
-  helpers::config::get as get_tauri_config,
+  helpers::config::{get as get_tauri_config, reload as reload_tauri_config},
   interface::{AppInterface, Interface, Options as InterfaceOptions},
   mobile::ios::LIB_OUTPUT_FILE_NAME,
   Result,
@@ -65,10 +65,14 @@ pub fn command(options: Options) -> Result<()> {
     }
   }
 
-  // `xcode-script` is ran from the `gen/apple` folder when not using NPM.
+  // `xcode-script` is ran from the `gen/apple` folder when not using NPM/yarn/pnpm.
   // so we must change working directory to the src-tauri folder to resolve the tauri dir
+  // additionally, bun@<1.2 does not modify the current working directory, so it is also runs this script from `gen/apple`
+  // bun@>1.2 now actually moves the CWD to the package root so we shouldn't modify CWD in that case
+  // see https://bun.sh/blog/bun-v1.2#bun-run-uses-the-correct-directory
   if (var_os("npm_lifecycle_event").is_none() && var_os("PNPM_PACKAGE_NAME").is_none())
-    || var("npm_config_user_agent").map_or(false, |agent| agent.starts_with("bun"))
+    || var("npm_config_user_agent")
+      .is_ok_and(|agent| agent.starts_with("bun/1.0") || agent.starts_with("bun/1.1"))
   {
     set_current_dir(current_dir()?.parent().unwrap().parent().unwrap()).unwrap();
   }
@@ -78,12 +82,33 @@ pub fn command(options: Options) -> Result<()> {
   let profile = profile_from_configuration(&options.configuration);
   let macos = macos_from_platform(&options.platform);
 
-  let tauri_config = get_tauri_config(tauri_utils::platform::Target::Ios, None)?;
+  let (tauri_config, cli_options) = {
+    let tauri_config = get_tauri_config(tauri_utils::platform::Target::Ios, &[])?;
+    let cli_options = {
+      let tauri_config_guard = tauri_config.lock().unwrap();
+      let tauri_config_ = tauri_config_guard.as_ref().unwrap();
+      read_options(tauri_config_)
+    };
+    let tauri_config = if cli_options.config.is_empty() {
+      tauri_config
+    } else {
+      // reload config with merges from the ios dev|build script
+      reload_tauri_config(
+        &cli_options
+          .config
+          .iter()
+          .map(|conf| &conf.0)
+          .collect::<Vec<_>>(),
+      )?
+    };
 
-  let (config, metadata, cli_options) = {
+    (tauri_config, cli_options)
+  };
+
+  let (config, metadata) = {
     let tauri_config_guard = tauri_config.lock().unwrap();
     let tauri_config_ = tauri_config_guard.as_ref().unwrap();
-    let cli_options = read_options(&tauri_config_.identifier);
+    let cli_options = read_options(tauri_config_);
     let (config, metadata) = get_config(
       &get_app(
         MobileTarget::Ios,
@@ -93,8 +118,8 @@ pub fn command(options: Options) -> Result<()> {
       tauri_config_,
       None,
       &cli_options,
-    );
-    (config, metadata, cli_options)
+    )?;
+    (config, metadata)
   };
   ensure_init(
     &tauri_config,
@@ -103,8 +128,14 @@ pub fn command(options: Options) -> Result<()> {
     MobileTarget::Ios,
   )?;
 
-  if let Some(config) = &cli_options.config {
-    crate::helpers::config::merge_with(&config.0)?;
+  if !cli_options.config.is_empty() {
+    crate::helpers::config::merge_with(
+      &cli_options
+        .config
+        .iter()
+        .map(|conf| &conf.0)
+        .collect::<Vec<_>>(),
+    )?;
   }
 
   let env = env()?.explicit_env_vars(cli_options.vars);
@@ -165,17 +196,25 @@ pub fn command(options: Options) -> Result<()> {
 
   let isysroot = format!("-isysroot {}", options.sdk_root.display());
 
-  for arch in options.arches {
+  let simulator =
+    options.platform == "iOS Simulator" || options.arches.contains(&"Simulator".to_string());
+  let arches = if simulator {
+    // when compiling for the simulator, we don't need to build other targets
+    vec![if cfg!(target_arch = "aarch64") {
+      "arm64"
+    } else {
+      "x86_64"
+    }
+    .to_string()]
+  } else {
+    options.arches
+  };
+  for arch in arches {
     // Set target-specific flags
     let (env_triple, rust_triple) = match arch.as_str() {
-      "arm64" => ("aarch64_apple_ios", "aarch64-apple-ios"),
-      "arm64-sim" => ("aarch64_apple_ios_sim", "aarch64-apple-ios-sim"),
+      "arm64" if !simulator => ("aarch64_apple_ios", "aarch64-apple-ios"),
+      "arm64" if simulator => ("aarch64_apple_ios_sim", "aarch64-apple-ios-sim"),
       "x86_64" => ("x86_64_apple_ios", "x86_64-apple-ios"),
-      "Simulator" => {
-        // when using Xcode, the arches for a simulator build will be ['Simulator', 'arm64-sim'] instead of ['arm64-sim']
-        // so we ignore that on our end
-        continue;
-      }
       _ => {
         return Err(anyhow::anyhow!(
           "Arch specified by Xcode was invalid. {} isn't a known arch",
@@ -189,9 +228,9 @@ pub fn command(options: Options) -> Result<()> {
       Some(rust_triple.into()),
     )?;
 
-    let cflags = format!("CFLAGS_{}", env_triple);
-    let cxxflags = format!("CFLAGS_{}", env_triple);
-    let objc_include_path = format!("OBJC_INCLUDE_PATH_{}", env_triple);
+    let cflags = format!("CFLAGS_{env_triple}");
+    let cxxflags = format!("CFLAGS_{env_triple}");
+    let objc_include_path = format!("OBJC_INCLUDE_PATH_{env_triple}");
     let mut target_env = host_env.clone();
     target_env.insert(cflags.as_ref(), isysroot.as_ref());
     target_env.insert(cxxflags.as_ref(), isysroot.as_ref());
@@ -200,7 +239,12 @@ pub fn command(options: Options) -> Result<()> {
     let target = if macos {
       &macos_target
     } else {
-      Target::for_arch(&arch).ok_or_else(|| {
+      Target::for_arch(if arch == "arm64" && simulator {
+        "arm64-sim"
+      } else {
+        &arch
+      })
+      .ok_or_else(|| {
         anyhow::anyhow!(
           "Arch specified by Xcode was invalid. {} isn't a known arch",
           arch
