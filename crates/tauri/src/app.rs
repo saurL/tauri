@@ -71,7 +71,6 @@ pub type ChannelInterceptor<R> =
   Box<dyn Fn(&Webview<R>, CallbackFn, usize, &InvokeResponseBody) -> bool + Send + Sync + 'static>;
 
 /// Push notifications token type.
-#[cfg(feature = "push-notifications")]
 pub type PushToken = Vec<u8>;
 
 /// The exit code on [`RunEvent::ExitRequested`] when [`AppHandle#method.restart`] is called.
@@ -256,10 +255,8 @@ pub enum RunEvent {
     /// Indicates whether the NSApplication object found any visible windows in your application.
     has_visible_windows: bool,
   },
-  #[cfg(feature = "push-notifications")]
   /// Indicates that a push token has become available.
   PushRegistration(PushToken),
-  #[cfg(feature = "push-notifications")]
   /// Indicates that an error occurred while registering for push notification services.
   PushRegistrationFailed(String),
 }
@@ -2442,9 +2439,7 @@ fn on_event_loop_event<R: Runtime>(
     }
     RuntimeRunEvent::Resumed => RunEvent::Resumed,
     RuntimeRunEvent::MainEventsCleared => RunEvent::MainEventsCleared,
-    #[cfg(feature = "push-notifications")]
     RuntimeRunEvent::PushRegistration(t) => RunEvent::PushRegistration(t),
-    #[cfg(feature = "push-notifications")]
     RuntimeRunEvent::PushRegistrationFailed(err) => RunEvent::PushRegistrationFailed(err),
     RuntimeRunEvent::UserEvent(t) => {
       match t {

@@ -238,10 +238,8 @@ pub enum RunEvent<T: UserEvent> {
     has_visible_windows: bool,
   },
   /// Push token was registered.
-  #[cfg(feature = "push-notifications")]
   PushRegistration(PushToken),
   /// Push token failure.
-  #[cfg(feature = "push-notifications")]
   PushRegistrationFailed(String),
   /// A custom event defined by the user.
   UserEvent(T),

@@ -11414,5 +11414,5 @@ dependencies = [
 
 [[patch.unused]]
 name = "tao"
-version = "0.30.8"
-source = "git+https://github.com/sgammon/tao.git?rev=79cae516189f4a1253ff2956295ec3c9411a4383#79cae516189f4a1253ff2956295ec3c9411a4383"
+version = "0.34.2"
+source = "git+https://github.com/saurL/tao#d30b47753494f2698703c6ca160471dfd1968ef8"

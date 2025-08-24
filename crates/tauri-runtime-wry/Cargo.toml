@@ -68,7 +68,6 @@ jni = "0.21"
 default = ["x11"]
 devtools = ["wry/devtools", "tauri-runtime/devtools"]
 x11 = ["tao/x11", "wry/x11"]
-push-notifications = ["tao/push-notifications"]
 macos-private-api = [
   "wry/fullscreen",
   "wry/transparent",
